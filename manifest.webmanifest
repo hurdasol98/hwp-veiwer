@@ -1,0 +1,19 @@
+{
+  "name": "HWP 뷰어",
+  "short_name": "HWP 뷰어",
+  "description": "설치 없이 HWP/HWPX 문서를 열람하고 PDF로 저장. 문서는 브라우저 안에서만 처리되며 외부로 전송되지 않습니다.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b0f16",
+  "theme_color": "#0b0f16",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%230b0f16'/%3E%3Crect x='120' y='96' width='272' height='320' rx='16' fill='%23ffffff'/%3E%3Crect x='156' y='150' width='200' height='16' rx='8' fill='%234a9eff'/%3E%3Crect x='156' y='200' width='200' height='12' rx='6' fill='%23c9d1dc'/%3E%3Crect x='156' y='240' width='200' height='12' rx='6' fill='%23c9d1dc'/%3E%3Crect x='156' y='280' width='140' height='12' rx='6' fill='%23c9d1dc'/%3E%3Crect x='156' y='330' width='200' height='40' rx='8' fill='%234a9eff'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
