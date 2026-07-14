@@ -16,6 +16,13 @@
     display: flex; align-items: center; gap: 10px;
     padding: 9px 16px; background: #171b24;
     border-bottom: 1px solid #2c3444; flex-shrink: 0;
+    flex-wrap: wrap; row-gap: 7px;          /* 좁은 화면(노트북·분할)에서 버튼이 밖으로 나가지 않게 */
+  }
+  header.app h1 { flex-shrink: 0; }
+  #fname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 700px) {
+    header.app { padding: 8px 10px; gap: 7px; }
+    #fname { max-width: 130px; }
   }
   header.app h1 { font-size: 15px; font-weight: 700; color: #7ab8ff; letter-spacing: -0.3px; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #2c3648; color: #9db8dd; display: none; }
@@ -114,7 +121,7 @@
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v16</span></h1>
+    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v17</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -2353,6 +2360,38 @@ cfb/cfb.js:
       try { fail('바로 열기 실패', e.message); } catch (e2) {}
     }
   };
+
+  // 복사 정규화: 화면은 원본 줄 그대로 그리지만, 복사는 문단 단위로 이어붙인다
+  // (줄마다 <div>라서 그냥 복사하면 문장 중간에 줄바꿈이 끼어듦)
+  function serializeNode(node) {
+    if (node.nodeType === 3) return node.nodeValue;
+    if (node.nodeType !== 1) return '';
+    var tag = node.tagName, out = '';
+    if (tag === 'BR') return '\n';
+    for (var i = 0; i < node.childNodes.length; i++) out += serializeNode(node.childNodes[i]);
+    if (node.classList && node.classList.contains('hx-seg')) return out + '\n';   // 문단 = 줄들을 이어붙임
+    if (tag === 'TD' || tag === 'TH') return out + '\t';
+    if (tag === 'TR') return out.replace(/\t$/, '') + '\n';
+    if (tag === 'TABLE' || tag === 'P') return out + '\n';
+    return out;
+  }
+  document.addEventListener('copy', function (e) {
+    try {
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+      if (!hxPage.contains(sel.anchorNode) && !hxPage.contains(sel.focusNode)) return;   // 뷰어 밖은 기본 동작
+      var frag = sel.getRangeAt(0).cloneContents();
+      var wrap = document.createElement('div');
+      wrap.appendChild(frag);
+      var text = serializeNode(wrap)
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      if (!text) return;
+      e.clipboardData.setData('text/plain', text);
+      e.preventDefault();
+    } catch (err) { /* 실패 시 브라우저 기본 복사 */ }
+  });
 
   function openFile(file) {
     if (!file) return;

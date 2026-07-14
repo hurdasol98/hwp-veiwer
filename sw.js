@@ -1,6 +1,6 @@
 // HWP 뷰어 — 오프라인 캐시 (첫 방문 후 망이 끊겨도 열림)
 // 문서 데이터는 절대 캐시하지 않음: 뷰어 껍데기(HTML/manifest)만 저장한다.
-const CACHE = 'hwp-viewer-v16';
+const CACHE = 'hwp-viewer-v17';
 const ASSETS = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
