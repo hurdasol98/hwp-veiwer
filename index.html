@@ -121,7 +121,7 @@
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v18</span></h1>
+    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v19</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -943,11 +943,18 @@ cfb/cfb.js:
     while (off + 4 <= u8.byteLength) {
       var h = (u8[off]) | (u8[off + 1] << 8) | (u8[off + 2] << 16) | (u8[off + 3] << 24);
       var tag = h & 0x3ff, level = (h >>> 10) & 0x3ff, size = h >>> 20;
+      var prev = off;
       off += 4;
-      if (size === 0xfff) { size = (u8[off]) | (u8[off + 1] << 8) | (u8[off + 2] << 16) | (u8[off + 3] << 24); off += 4; }
+      if (size === 0xfff) {
+        size = ((u8[off]) | (u8[off + 1] << 8) | (u8[off + 2] << 16) | (u8[off + 3] << 24)) >>> 0;   // 부호 제거
+        off += 4;
+      }
+      if (size > u8.byteLength) break;                 // 손상: 비정상 크기
       if (off + size > u8.byteLength) break;
       out.push({ tag: tag, level: level, payload: u8.subarray(off, off + size) });
       off += size;
+      if (off <= prev) break;                          // 손상: 오프셋 역행 = 무한 루프 봉쇄
+      if (out.length > 2000000) break;                 // 안전 상한
     }
     return out;
   }
@@ -1969,9 +1976,20 @@ cfb/cfb.js:
         }
         continue;
       }
+      // 넘침 판정은 '실제 그려진 우측 끝' 기준 (표 셀 안에서는 scrollWidth가 넘침을 반영하지 못함)
       var w = l.querySelector(':scope > .hx-fitwrap');
+      var lrect = l.getBoundingClientRect();
+      var rightEdge = function (el) {
+        var mx = 0;
+        for (var ci = 0; ci < el.children.length; ci++) {
+          var rr = el.children[ci].getBoundingClientRect();
+          if (rr.right > mx) mx = rr.right;
+        }
+        return mx;
+      };
       if (!w) {
-        if (l.scrollWidth <= l.clientWidth + 1) continue;
+        var padR = parseFloat(getComputedStyle(l).paddingRight) || 0;
+        if (rightEdge(l) <= lrect.right - padR + 1) continue;
         w = document.createElement('span');
         w.className = 'hx-fitwrap';
         while (l.firstChild) w.appendChild(l.firstChild);
@@ -1981,9 +1999,12 @@ cfb/cfb.js:
         w.style.transformOrigin = 'left top';
       }
       w.style.transform = '';
-      var avail = l.clientWidth - (parseFloat(l.style.paddingLeft) || 0);
-      if (w.scrollWidth > avail + 1 && avail > 4)
-        w.style.transform = 'scaleX(' + (avail / w.scrollWidth).toFixed(4) + ')';
+      var wrect = w.getBoundingClientRect();
+      var padRight = parseFloat(getComputedStyle(l).paddingRight) || 0;
+      var avail = (lrect.right - padRight) - wrect.left;
+      var need = Math.max(w.scrollWidth, rightEdge(w) - wrect.left, wrect.width);
+      if (need > avail + 1 && avail > 4)
+        w.style.transform = 'scaleX(' + (avail / need).toFixed(4) + ')';
     }
   }
   var fitTimer = null;
@@ -2251,6 +2272,15 @@ cfb/cfb.js:
       cards2[c2i].style.minHeight = (pi.h * info.U2PX) + 'px';
       cards2[c2i].style.padding = padCss;
       cards2[c2i].style.setProperty('--hx-padtop', (pi.mt * info.U2PX) + 'px');
+    }
+    // 내용이 전혀 없는 쪽 제거 (섹션 경계·앵커 처리에서 생기는 유령 쪽) — 문서 전체가 비면 1쪽은 유지
+    var allCards = hxPage.querySelectorAll('.hx-pagecard');
+    if (allCards.length > 1) {
+      for (var ec = allCards.length - 1; ec >= 0; ec--) {
+        var cd = allCards[ec];
+        if (!cd.textContent.trim() && !cd.querySelector('table,img,svg') &&
+            hxPage.querySelectorAll('.hx-pagecard').length > 1) cd.remove();
+      }
     }
     reflowFlowGaps(hxPage);
     repairOverflow(hxPage, (pi.h - pi.mt - pi.mb) * info.U2PX);
