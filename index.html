@@ -121,7 +121,7 @@
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v19</span></h1>
+    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v20</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -2187,7 +2187,21 @@ cfb/cfb.js:
           continue;
         }
         var tbl = el.querySelector && el.querySelector('table');
-        var splittable = tbl && tbl.rows.length > 2 && !tbl.querySelector('[rowspan]:not([rowspan="1"])');
+        // 분할 가능 행 경계: 해당 행 시작 시점에 '열려 있는 rowspan'이 없는 곳
+        var safeRow = null;
+        if (tbl && tbl.rows.length > 2) {
+          safeRow = new Array(tbl.rows.length + 1).fill(true);
+          var openUntil = 0;
+          for (var sr = 0; sr < tbl.rows.length; sr++) {
+            if (sr < openUntil) safeRow[sr] = false;
+            var cells = tbl.rows[sr].cells;
+            for (var sc = 0; sc < cells.length; sc++) {
+              var rs = parseInt(cells[sc].getAttribute('rowspan') || '1', 10) || 1;
+              if (sr + rs > openUntil) openUntil = sr + rs;
+            }
+          }
+        }
+        var splittable = tbl && tbl.rows.length > 2;
         if (splittable) {
           if (target !== card) target.appendChild(el);
           used += mt;
@@ -2195,7 +2209,7 @@ cfb/cfb.js:
           var shell = tbl;
           for (var ri = 0; ri < rows.length; ri++) {
             var rh = rows[ri].offsetHeight;
-            if (used + rh > contentHpx - 2 && shell.rows.length) {
+            if (used + rh > contentHpx - 2 && shell.rows.length && (!safeRow || safeRow[ri])) {
               target = mk(target); used = 0;
               var t2 = tbl.cloneNode(false);
               t2.style.cssText = tbl.style.cssText;
@@ -2217,12 +2231,30 @@ cfb/cfb.js:
             (shell.tBodies[0] || shell).appendChild(rows[ri]);
             used += rh;
           }
+        } else if (el.classList && el.classList.contains('hx-seg') && el.children.length > 1) {
+          // 여러 줄 seg 문단: 줄 단위로 나눠 카드 경계에 맞춤
+          if (target !== card) { target.appendChild(el); }
+          used += mt;
+          var lines = Array.prototype.slice.call(el.children);
+          var cont = el;
+          for (var li = 0; li < lines.length; li++) {
+            var lh = lines[li].offsetHeight;
+            if (used + lh > contentHpx - 2 && cont.children.length) {
+              target = mk(target); used = 0;
+              cont = document.createElement('div');
+              cont.className = el.className;
+              cont.style.cssText = el.style.cssText;
+              cont.style.marginTop = '0';
+              target.appendChild(cont);
+            }
+            cont.appendChild(lines[li]);
+            used += lh;
+          }
         } else {
           target = mk(target); used = 0;
           target.appendChild(el);
           used += el.offsetHeight;
         }
-        if (++guard > 600) break;
       }
     }
   }
