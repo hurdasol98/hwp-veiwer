@@ -121,7 +121,7 @@
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v20</span></h1>
+    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v33</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -962,7 +962,8 @@ cfb/cfb.js:
   var T = { DOC_PROPS: 16, BIN_DATA: 18, FACE_NAME: 19, BORDER_FILL: 20, CHAR_SHAPE: 21, NUMBERING: 23, BULLET: 24, PARA_SHAPE: 25,
     PARA_HEADER: 66, PARA_TEXT: 67, PARA_CHAR_SHAPE: 68, CTRL_HEADER: 71, LIST_HEADER: 72, PAGE_DEF: 73, LINE_SEG: 69, TABLE: 77, SHAPE_PIC: 85 };
   function cid(s) { return (s.charCodeAt(0) << 24) | (s.charCodeAt(1) << 16) | (s.charCodeAt(2) << 8) | s.charCodeAt(3); }
-  var CT = { TBL: cid('tbl '), GSO: cid('gso '), FN: cid('fn  '), EN: cid('en  '), EQ: cid('eqed') };
+  var CT = { TBL: cid('tbl '), GSO: cid('gso '), FN: cid('fn  '), EN: cid('en  '), EQ: cid('eqed'),
+    HEAD: cid('head'), FOOT: cid('foot') };
   var BW_MM = [0.1, 0.12, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0];
   var STROKE = ['none', 'solid', 'dashed', 'dotted', 'dashed', 'dashed', 'dashed', 'dotted',
     'double', 'double', 'double', 'double', 'solid', 'double', 'inset', 'outset', 'groove', 'ridge'];
@@ -985,9 +986,10 @@ cfb/cfb.js:
         if (r.tag === T.DOC_PROPS) info.sectionSize = b.u16() || 1;
         else if (r.tag === T.BIN_DATA) {
           var bf2 = b.u16();
+          info.binSeq = (info.binSeq || 0) + 1;         // 그림 참조(picId)는 DocInfo 등장 순번(1-based)
           if ((bf2 & 15) === 1) {                       // EMBEDDING
-            var bid = b.u16();
-            info.binData[bid] = { ext: (b.left() >= 2 ? b.str() : 'png').toLowerCase(), comp: (bf2 >> 4) & 3 };
+            var bid = b.u16();                          // 저장 ID → BIN%04X 파일명
+            info.binData[info.binSeq] = { sid: bid, ext: (b.left() >= 2 ? b.str() : 'png').toLowerCase(), comp: (bf2 >> 4) & 3 };
           }
         }
         else if (r.tag === T.FACE_NAME) { b.u8(); info.fonts.push(b.str()); }
@@ -1056,7 +1058,7 @@ cfb/cfb.js:
 
   /* ---------- Section ---------- */
   function parseSection(u8, ctx) {
-    var rs = records(u8), pos = 0, pageInfo = null, notes = [];
+    var rs = records(u8), pos = 0, pageInfo = null, notes = [], headers = [], footers = [];
 
     function scanPageDef(from, to) {
       for (var i = from; i < to; i++) if (rs[i].tag === T.PAGE_DEF) { readPageDef(rs[i].payload); return; }
@@ -1154,10 +1156,16 @@ cfb/cfb.js:
         try {
           var b = BR(payload);
           b.skip(headBytes);              // 문단수 등 헤더부
+          var DEFPAD = 141;               // 문서 기본 여백 1.41pt
           var c = { col: b.u16(), row: b.u16(), colSpan: b.u16(), rowSpan: b.u16(),
             width: b.i32(), height: b.i32(),
             pad: [b.u16(), b.u16(), b.u16(), b.u16()],  // L R T B
             borderFillId: 0, paras: [] };
+          // 여백 정합성: 센티널(미지정) 또는 '셀보다 큰 여백'은 기하학적으로 불가능 → 기본값 사용
+          for (var pk = 0; pk < 4; pk++)
+            if (c.pad[pk] === 0xffff || c.pad[pk] === 0xfffe) c.pad[pk] = DEFPAD;
+          if (c.width > 0 && c.pad[0] + c.pad[1] >= c.width) { c.pad[0] = DEFPAD; c.pad[1] = DEFPAD; }
+          if (c.height > 0 && c.pad[2] + c.pad[3] >= c.height) { c.pad[2] = DEFPAD; c.pad[3] = DEFPAD; }
           if (b.left() >= 2) c.borderFillId = b.u16();
           return c;
         } catch (e) { return null; }
@@ -1202,6 +1210,7 @@ cfb/cfb.js:
               var tb = BR(c.payload);
               var tflags = tb.u32();
               tbl.repeatHeader = !!(tflags & 4);        // 비트2 = 제목 행 반복 (pyhwp tagid61)
+              tbl.splitPage = tflags & 3;               // 비트0~1 = 쪽 나눔 (0 없음 / 1 셀단위 / 2 나눔)
               tbl.rows = tb.u16(); tbl.cols = tb.u16();
               pos++;
             } else if (c.tag === T.LIST_HEADER) {
@@ -1263,6 +1272,17 @@ cfb/cfb.js:
             else pos++;
           }
           notes.push(fps);
+        } else if (id === CT.HEAD || id === CT.FOOT) {
+          // 머리말·꼬리말: 본문과 별도 영역에 그리도록 수집 (적용 쪽 구분은 payload 첫 바이트)
+          var hps = [];
+          var applyTo = 0;                       // 0 양쪽 / 1 짝수 / 2 홀수
+          try { applyTo = BR(r.payload).skip(4).u8() & 3; } catch (eh) {}
+          while (pos < rs.length && rs[pos].level > level) {
+            var c4 = rs[pos];
+            if (c4.tag === T.LIST_HEADER) { var lv3 = c4.level; pos++; collectParas(lv3, hps); }
+            else pos++;
+          }
+          if (hps.length) (id === CT.HEAD ? headers : footers).push({ paras: hps, apply: applyTo });
         } else {
           // 미지원(secd/cold/head 등): PAGE_DEF만 회수하고 스킵
           var from = pos;
@@ -1280,7 +1300,7 @@ cfb/cfb.js:
       if (rs[pos].tag === T.PARA_HEADER) paras.push(parseParagraph(rs[pos].level));
       else pos++;
     }
-    return { paras: paras, pageInfo: pageInfo, notes: notes };
+    return { paras: paras, pageInfo: pageInfo, notes: notes, headers: headers, footers: footers };
   }
 
   /* ---------- 렌더 ---------- */
@@ -1559,6 +1579,7 @@ cfb/cfb.js:
       var wrap = null;
       var table = ctx.doc.createElement('table');
       if (blk.repeatHeader) table.setAttribute('data-rephdr', '1');   // 쪽 넘길 때 제목 행 반복
+      if (blk.splitPage != null) table.setAttribute('data-split', String(blk.splitPage));   // 쪽 나눔 허용 여부
       table.className = 'hx-tbl';
       // 열 너비 확정: colSpan 1 셀 우선, 스팬 셀은 미확정 열에 잔여 균등 배분
       var nCols = blk.cols || 0;
@@ -1707,17 +1728,36 @@ cfb/cfb.js:
     var urlCache = {}, urls = [];
     var MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp' };
     function binUrl(id) {
-      if (!id || !info.binData[id]) return null;
+      if (!id) return null;
       if (id in urlCache) return urlCache[id];
       var bd = info.binData[id];
-      var name = 'BIN' + id.toString(16).toUpperCase().padStart(4, '0') + '.' + bd.ext;
-      var e = CFB.find(cont, 'Root Entry/BinData/' + name) || CFB.find(cont, 'BinData/' + name);
+      var e = null, ext = 'png';
+      if (bd) {
+        ext = bd.ext;
+        var sid = (bd.sid != null ? bd.sid : id);
+        var name = 'BIN' + sid.toString(16).toUpperCase().padStart(4, '0') + '.' + bd.ext;
+        e = CFB.find(cont, 'Root Entry/BinData/' + name) || CFB.find(cont, 'BinData/' + name);
+      }
+      if (!e) {                                   // DocInfo에 없는 참조: 저장소에서 순번으로 해석
+        var names = [];
+        for (var fi = 0; fi < cont.FullPaths.length; fi++) {
+          var fp = cont.FullPaths[fi];
+          if (/\/BinData\/BIN[0-9A-F]{4}\./i.test(fp)) names.push(fp);
+        }
+        names.sort();
+        var pick = names[id - 1];
+        if (pick) {
+          e = CFB.find(cont, pick);
+          ext = (pick.match(/\.([a-zA-Z0-9]+)$/) || [, 'png'])[1].toLowerCase();
+          bd = bd || { comp: 2, ext: ext };
+        }
+      }
       if (!e) { urlCache[id] = null; return null; }
       var raw = e.content instanceof Uint8Array ? e.content : Uint8Array.from(e.content);
       var data = raw;
-      if (bd.comp !== 2) { try { data = inflate(raw); } catch (ez) { data = raw; } }
+      if (bd && bd.comp !== 2) { try { data = inflate(raw); } catch (ez) { data = raw; } }
       try {
-        var u = URL.createObjectURL(new Blob([data], { type: MIME[bd.ext] || 'application/octet-stream' }));
+        var u = URL.createObjectURL(new Blob([data], { type: MIME[ext] || 'application/octet-stream' }));
         urlCache[id] = u; urls.push(u); return u;
       } catch (eb) { urlCache[id] = null; return null; }
     }
@@ -1788,6 +1828,20 @@ cfb/cfb.js:
           noteBox.appendChild(row);
         });
         secDiv.appendChild(noteBox);
+      }
+      if (sec.headers && sec.headers.length) {
+        var hdBox = docRef.createElement('div');
+        hdBox.className = 'hx-headersrc';
+        hdBox.style.display = 'none';                     // 원본 보관용(셸이 쪽마다 복제)
+        sec.headers[0].paras.forEach(function (p) { hdBox.appendChild(renderPara(p, ctx)); });
+        secDiv.appendChild(hdBox);
+      }
+      if (sec.footers && sec.footers.length) {
+        var ftBox = docRef.createElement('div');
+        ftBox.className = 'hx-footersrc';
+        ftBox.style.display = 'none';
+        sec.footers[0].paras.forEach(function (p) { ftBox.appendChild(renderPara(p, ctx)); });
+        secDiv.appendChild(ftBox);
       }
       container.appendChild(secDiv);
     }
@@ -2092,8 +2146,11 @@ cfb/cfb.js:
         var tbl = el.querySelector && el.querySelector('table');
         if (tbl && h > contentHpx + 2 && !tbl.querySelector('[rowspan]:not([rowspan="1"])')) {
           // 페이지 초과 표: 행 단위 분할 (병합 없는 표만)
+          tbl.style.height = ''; el.style.height = '';
           card.appendChild(el); used += hOf(el) - tbl.offsetHeight;
           var rows = Array.prototype.slice.call(tbl.rows);
+          var rowH = [];
+          for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].offsetHeight);   // 이동 전 일괄 측정
           var shell = tbl;
           for (var ri2 = 0; ri2 < rows.length; ri2++) {
             var rh = rows[ri2].offsetHeight;
@@ -2201,31 +2258,114 @@ cfb/cfb.js:
             }
           }
         }
-        var splittable = tbl && tbl.rows.length > 2;
+        var splitAllowed = !tbl || tbl.getAttribute('data-split') !== '0';   // 원본이 '쪽 나눔 없음'이면 쪼개지 않음
+        var tallCell = null;
+        if (tbl && splitAllowed && tbl.rows.length <= 2) {
+          // 한 쪽보다 큰 1행 글상자: 셀 안 내용을 줄 단위로 나눠 여러 쪽에 흘림
+          for (var tc = 0; tc < tbl.rows.length; tc++) {
+            var cellT = tbl.rows[tc].cells[0];
+            if (cellT && cellT.offsetHeight > contentHpx) { tallCell = cellT; break }
+          }
+        }
+        if (tallCell) {
+          if (target !== card) target.appendChild(el);
+          used += mt;
+          tbl.style.height = ''; el.style.height = '';
+          tallCell.style.height = '';
+          // 셀 내부의 배치 단위(문단) 목록을 만들되, 문단이 크면 줄 단위로 펼침
+          var cellUnits = [];
+          var kidsT = Array.prototype.slice.call(tallCell.children);
+          for (var ku = 0; ku < kidsT.length; ku++) {
+            var kd = kidsT[ku];
+            if (kd.classList && kd.classList.contains('hx-seg') && kd.children.length > 1 && kd.offsetHeight > contentHpx * 0.5)
+              cellUnits.push({ para: kd, lines: Array.prototype.slice.call(kd.children) });
+            else cellUnits.push({ para: kd, lines: null });
+          }
+          var curCell = tallCell, curTbl = tbl, curWrap = el, guardT = 0;
+          var lockW = tbl.offsetWidth, lockCW = tallCell.offsetWidth;   // 분할 후에도 원래 폭 유지
+          var newPage = function () {
+            target = mk(target); used = 0;
+            var t3 = curTbl.cloneNode(false);
+            t3.style.cssText = curTbl.style.cssText;
+            t3.style.height = '';
+            t3.style.width = lockW + 'px';
+            t3.style.tableLayout = 'fixed';
+            var cg3 = curTbl.querySelector('colgroup');
+            if (cg3) t3.appendChild(cg3.cloneNode(true));
+            var tb3 = document.createElement('tbody');
+            var tr3 = document.createElement('tr');
+            var td3 = curCell.cloneNode(false);
+            td3.style.height = '';
+            td3.style.width = lockCW + 'px';
+            tr3.appendChild(td3); tb3.appendChild(tr3); t3.appendChild(tb3);
+            var w3 = document.createElement('div');
+            w3.className = curWrap.className;
+            w3.style.cssText = curWrap.style.cssText;
+            w3.style.marginTop = '0'; w3.style.height = '';
+            w3.appendChild(t3);
+            target.appendChild(w3);
+            curTbl = t3; curCell = td3; curWrap = w3;
+          };
+          for (var ui2 = 0; ui2 < cellUnits.length && guardT++ < 900; ui2++) {
+            var un = cellUnits[ui2];
+            if (!un.lines) {
+              var uh = un.para.offsetHeight;
+              if (used + uh > contentHpx - 2 && curCell.children.length) newPage();
+              curCell.appendChild(un.para);
+              used += un.para.offsetHeight;
+            } else {
+              var host = un.para;
+              if (host.parentNode !== curCell) curCell.appendChild(host);
+              for (var li2 = 0; li2 < un.lines.length; li2++) {
+                var lnH = un.lines[li2].offsetHeight;
+                if (used + lnH > contentHpx - 2 && host.children.length) {
+                  newPage();
+                  host = document.createElement('div');
+                  host.className = un.para.className;
+                  host.style.cssText = un.para.style.cssText;
+                  host.style.marginTop = '0';
+                  curCell.appendChild(host);
+                }
+                host.appendChild(un.lines[li2]);
+                used += lnH;
+              }
+            }
+          }
+          if (++guard > 600) break;
+          continue;
+        }
+        var splittable = tbl && splitAllowed && tbl.rows.length > 2;
         if (splittable) {
           if (target !== card) target.appendChild(el);
           used += mt;
+          tbl.style.height = '';                       // 표 전체 지정높이 해제 — 분할 후 행이 그 높이로 팽창하는 것 방지
+          el.style.height = '';
           var rows = Array.prototype.slice.call(tbl.rows);
+          var rowH = [];
+          for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].offsetHeight);   // 이동 전 일괄 측정
           var shell = tbl;
           for (var ri = 0; ri < rows.length; ri++) {
-            var rh = rows[ri].offsetHeight;
+            var rh = rowH[ri];
             if (used + rh > contentHpx - 2 && shell.rows.length && (!safeRow || safeRow[ri])) {
               target = mk(target); used = 0;
               var t2 = tbl.cloneNode(false);
               t2.style.cssText = tbl.style.cssText;
+              t2.style.height = '';                    // 조각에도 지정높이 금지
               var cg = tbl.querySelector('colgroup');
               if (cg) t2.appendChild(cg.cloneNode(true));
               var w2 = document.createElement('div');
               w2.className = el.className;
               w2.style.cssText = el.style.cssText;
               w2.style.marginTop = '0';
+              w2.style.height = '';
               w2.appendChild(t2);
               target.appendChild(w2);
               shell = t2;
-              if (tbl.getAttribute('data-rephdr') === '1' && rows[0]) {   // 제목 행 반복
+              // 제목 행 반복: 파일 플래그 + '긴 목록형 표'일 때만 (짧은 서식 표는 원본이 반복하지 않음)
+              if (tbl.getAttribute('data-rephdr') === '1' && rows.length >= 20 && rows[0]) {
                 var hd = rows[0].cloneNode(true);
                 (t2.tBodies[0] || t2).appendChild(hd);
-                used += rows[0].offsetHeight;
+                used += rowH[0];
               }
             }
             (shell.tBodies[0] || shell).appendChild(rows[ri]);
@@ -2305,6 +2445,20 @@ cfb/cfb.js:
       cards2[c2i].style.padding = padCss;
       cards2[c2i].style.setProperty('--hx-padtop', (pi.mt * info.U2PX) + 'px');
     }
+    // 각주·미주 블록이 쪽 카드 밖에 남으면 인쇄에서 별도 쪽이 생김 → 해당 쪽 안으로 이동
+    var noteBlocks = [];
+    var allNotes = hxPage.querySelectorAll('.hx-notes');
+    for (var nb0 = 0; nb0 < allNotes.length; nb0++)
+      if (!allNotes[nb0].closest('.hx-pagecard')) noteBlocks.push(allNotes[nb0]);
+    for (var nb1 = 0; nb1 < noteBlocks.length; nb1++) {
+      var nBlk = noteBlocks[nb1], host = nBlk.previousElementSibling;
+      while (host && !(host.classList && host.classList.contains('hx-pagecard'))) host = host.previousElementSibling;
+      if (!host) {
+        var allC = hxPage.querySelectorAll('.hx-pagecard');
+        host = allC[allC.length - 1];
+      }
+      if (host) host.appendChild(nBlk);
+    }
     // 내용이 전혀 없는 쪽 제거 (섹션 경계·앵커 처리에서 생기는 유령 쪽) — 문서 전체가 비면 1쪽은 유지
     var allCards = hxPage.querySelectorAll('.hx-pagecard');
     if (allCards.length > 1) {
@@ -2313,6 +2467,20 @@ cfb/cfb.js:
         if (!cd.textContent.trim() && !cd.querySelector('table,img,svg') &&
             hxPage.querySelectorAll('.hx-pagecard').length > 1) cd.remove();
       }
+    }
+    // 셀 지정높이 자가검증: 내용보다 '한 쪽 이상' 큰 높이는 성립 불가 → 해제 (빈 표·유령 여백 방지)
+    // 최적화: 지정높이가 한 쪽보다 큰 셀만 후보 → 측정 대상을 수천 개에서 수 개로 줄임
+    var contentHguard = (pi.h - pi.mt - pi.mb) * info.U2PX;
+    var tdsG = hxPage.querySelectorAll('td');
+    var candG = [];
+    for (var gi = 0; gi < tdsG.length; gi++) {
+      var declG = parseFloat(tdsG[gi].style.height) || 0;
+      if (declG > contentHguard) candG.push([tdsG[gi], declG]);   // 읽기 없음(스타일 문자열만)
+    }
+    for (var gc = 0; gc < candG.length; gc++) {
+      var tdG = candG[gc][0], decl = candG[gc][1], inner = 0;
+      for (var gk = 0; gk < tdG.children.length; gk++) inner += tdG.children[gk].offsetHeight;
+      if (decl - inner > contentHguard) tdG.style.height = '';
     }
     reflowFlowGaps(hxPage);
     repairOverflow(hxPage, (pi.h - pi.mt - pi.mb) * info.U2PX);
@@ -2324,8 +2492,57 @@ cfb/cfb.js:
       cards3[c3].style.setProperty('--hx-padtop', (pi.mt * info.U2PX) + 'px');
     }
     // 보더 누적 잔차(수십 px): 초과 카드만 미세 zoom으로 A4 봉인 (내용 무손실)
+    // 쪽을 지배하는 개체 줄(≥60%) 뒤에 남은 짧은 줄은 다음 쪽으로 넘김 — 한글의 자연 넘김 재현
+    var cardsN = Array.prototype.slice.call(hxPage.querySelectorAll('.hx-pagecard'));
+    var contentHn = (pi.h - pi.mt - pi.mb) * info.U2PX;
+    for (var ni = 0; ni < cardsN.length; ni++) {
+      var cN = cardsN[ni];
+      var sumN = 0;
+      for (var qk = 0; qk < cN.children.length; qk++) {
+        var chQ = cN.children[qk];
+        if (chQ.style && chQ.style.position === 'absolute') continue;
+        sumN += chQ.offsetHeight + (parseFloat(getComputedStyle(chQ).marginTop) || 0);
+      }
+      var overN = sumN - contentHn;
+      if (overN <= 1) continue;
+      var segN2 = null;
+      for (var sk = cN.children.length - 1; sk >= 0; sk--) {
+        var ch = cN.children[sk];
+        if (ch.classList && ch.classList.contains('hx-p') && ch.children.length > 1) { segN2 = ch; break }
+      }
+      if (!segN2) continue;
+      var dominating = false;
+      for (var dk = 0; dk < segN2.children.length; dk++)
+        if (segN2.children[dk].offsetHeight >= contentHn * 0.6) { dominating = true; break }
+      if (!dominating) continue;
+      var moved = [], guardN = 0;
+      while (overN > 1 && segN2.children.length > 1 && guardN++ < 40) {
+        var lastL = segN2.children[segN2.children.length - 1];
+        var lh2 = lastL.offsetHeight;
+        if (lh2 > contentHn * 0.25) break;         // 큰 줄은 옮기지 않음(구조 훼손 방지)
+        moved.unshift(lastL);
+        segN2.removeChild(lastL);
+        overN -= lh2;
+      }
+      if (!moved.length) continue;
+      var nextC = cardsN[ni + 1];
+      if (!nextC) {
+        nextC = document.createElement('div');
+        nextC.className = 'hx-pagecard';
+        nextC.style.cssText = cN.style.cssText;
+        cN.parentNode.insertBefore(nextC, cN.nextSibling);
+        cardsN.push(nextC);
+      }
+      var holder = document.createElement('div');
+      holder.className = segN2.className;
+      holder.style.cssText = segN2.style.cssText;
+      holder.style.marginTop = '0';
+      for (var mk = 0; mk < moved.length; mk++) holder.appendChild(moved[mk]);
+      nextC.insertBefore(holder, nextC.firstChild);
+    }
     var contentHpx2 = (pi.h - pi.mt - pi.mb) * info.U2PX;
     var cardsF = hxPage.querySelectorAll('.hx-pagecard');
+    var innersF = [];
     for (var cf = 0; cf < cardsF.length; cf++) {
       var cEl = cardsF[cf];
       cEl.style.zoom = '';
@@ -2343,12 +2560,74 @@ cfb/cfb.js:
         for (var kj = 0; kj < kids.length; kj++) inner.appendChild(kids[kj]);
       }
       inner.style.zoom = '';
-      var ih = inner.scrollHeight;
+      innersF.push(inner);
+    }
+    // 쓰기(zoom 해제)를 모두 끝낸 뒤 읽기 → 쓰기 순으로 분리: 카드마다 레이아웃 재계산되던 것을 1회로
+    var ihList = [];
+    for (var rf = 0; rf < innersF.length; rf++) ihList.push(innersF[rf].scrollHeight);
+    for (var wf = 0; wf < innersF.length; wf++) {
+      var ih = ihList[wf];
       // 내용이 인쇄 영역을 넘으면 그만큼만 미세 축소 (카드는 A4 크기 유지 → 화면·인쇄 동일)
       if (ih > contentHpx2 + 2) {
         var z = contentHpx2 / ih;
-        if (z > 0.8) inner.style.zoom = z.toFixed(4);   // 20%까지만; 그 이상은 구조 문제이므로 드러냄
+        if (z > 0.8) innersF[wf].style.zoom = z.toFixed(4);   // 20%까지만; 그 이상은 구조 문제이므로 드러냄
       }
+    }
+    // 각주·미주 쪽 하단 정렬 (한글은 본문 아래 쪽 밑단에 배치)
+    var notesAll = hxPage.querySelectorAll('.hx-pagecard .hx-notes');
+    for (var na = 0; na < notesAll.length; na++) {
+      var nB = notesAll[na], hostC = nB.closest('.hx-pagecard');
+      if (!hostC) continue;
+      nB.style.marginTop = '';
+      var csC = getComputedStyle(hostC);
+      var availC = hostC.clientHeight - (parseFloat(csC.paddingTop) || 0) - (parseFloat(csC.paddingBottom) || 0);
+      var usedC = 0, parentN = nB.parentNode;
+      for (var qc = 0; qc < parentN.children.length; qc++) {
+        var kc = parentN.children[qc];
+        if (kc === nB) continue;
+        if (kc.style && kc.style.position === 'absolute') continue;
+        usedC += kc.offsetHeight + (parseFloat(getComputedStyle(kc).marginTop) || 0);
+      }
+      var gapC = availC - usedC - nB.offsetHeight;
+      if (gapC > 6) nB.style.marginTop = Math.round(gapC - 2) + 'px';
+    }
+    // 최종 정리: 분할·이동 과정에서 생긴 빈 쪽 제거 (쪽번호 부여 직전)
+    var finalCards = hxPage.querySelectorAll('.hx-pagecard');
+    if (finalCards.length > 1) {
+      for (var fc = finalCards.length - 1; fc >= 0; fc--) {
+        var cdF = finalCards[fc];
+        if (!cdF.textContent.trim() && !cdF.querySelector('table,img,svg') &&
+            hxPage.querySelectorAll('.hx-pagecard').length > 1) cdF.remove();
+      }
+    }
+    // 머리말·꼬리말: 각 쪽 여백 영역에 복제 배치 (한글은 쪽마다 반복해 인쇄)
+    var hdSrc = hxPage.querySelector('.hx-headersrc');
+    var ftSrc = hxPage.querySelector('.hx-footersrc');
+    if (hdSrc || ftSrc) {
+      var cardsHF = hxPage.querySelectorAll('.hx-pagecard');
+      var padTopPx = pi.mt * info.U2PX, padBotPx = pi.mb * info.U2PX;
+      var sideL = pi.ml * info.U2PX, sideR = pi.mr * info.U2PX;
+      for (var hi = 0; hi < cardsHF.length; hi++) {
+        var cardHF = cardsHF[hi];
+        if (cardHF.querySelector('.hx-runhead')) continue;      // 재배치 시 중복 방지
+        if (hdSrc) {
+          var hCopy = hdSrc.cloneNode(true);
+          hCopy.className = 'hx-runhead';
+          hCopy.style.cssText = 'display:block;position:absolute;left:' + sideL + 'px;right:' + sideR +
+            'px;top:' + Math.max(2, padTopPx * 0.28) + 'px;overflow:hidden;';
+          cardHF.appendChild(hCopy);
+        }
+        if (ftSrc) {
+          var fCopy = ftSrc.cloneNode(true);
+          fCopy.className = 'hx-runfoot';
+          fCopy.style.cssText = 'display:block;position:absolute;left:' + sideL + 'px;right:' + sideR +
+            'px;bottom:' + Math.max(2, padBotPx * 0.28) + 'px;overflow:hidden;';
+          cardHF.appendChild(fCopy);
+        }
+        if (getComputedStyle(cardHF).position === 'static') cardHF.style.position = 'relative';
+      }
+      if (hdSrc) hdSrc.remove();
+      if (ftSrc) ftSrc.remove();
     }
     // 쪽 번호: 카드 속성으로만 표기 (별도 노드 금지 — 인쇄 페이지 분절을 교란함)
     var cardsN = hxPage.querySelectorAll('.hx-pagecard');
@@ -2539,7 +2818,8 @@ cfb/cfb.js:
     if (tag === 'BR') return '\n';
     for (var i = 0; i < node.childNodes.length; i++) out += serializeNode(node.childNodes[i]);
     if (node.classList && node.classList.contains('hx-seg')) return out + '\n';   // 문단 = 줄들을 이어붙임
-    if (tag === 'TD' || tag === 'TH') return out + '\t';
+    if (tag === 'TD' || tag === 'TH')
+      return out.replace(/\s*\n+\s*/g, ' ').replace(/\s+$/, '') + '\t';   // 셀 안 줄바꿈 → 공백 (엑셀 행 유지)
     if (tag === 'TR') return out.replace(/\t$/, '') + '\n';
     if (tag === 'TABLE' || tag === 'P') return out + '\n';
     return out;
@@ -2627,6 +2907,54 @@ cfb/cfb.js:
     setZoom(zoom * (e.deltaY < 0 ? 1.06 : 1 / 1.06));
     saveZoom();
   }, { passive: false });
+  // 진단용 숨은 기능: Ctrl+Alt+D — 문단·표 경계와 좌표를 겹쳐 표시
+  var dbgOn = false;
+  window.addEventListener('keydown', function (e) {
+    if (!(e.ctrlKey && e.altKey && (e.key === 'd' || e.key === 'D'))) return;
+    e.preventDefault();
+    dbgOn = !dbgOn;
+    var old = hxPage.querySelectorAll('.hx-dbg');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+    var marked = hxPage.querySelectorAll('[data-dbgmark]');
+    for (var m = 0; m < marked.length; m++) {
+      marked[m].style.outline = '';
+      marked[m].removeAttribute('data-dbgmark');
+    }
+    if (!dbgOn) return;
+    var cards = hxPage.querySelectorAll('.hx-pagecard');
+    for (var c = 0; c < cards.length; c++) {
+      var card = cards[c];
+      if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+      var cr = card.getBoundingClientRect();
+      // 쪽 정보
+      var tag = document.createElement('div');
+      tag.className = 'hx-dbg';
+      tag.style.cssText = 'position:absolute;left:2px;top:2px;z-index:9;background:#d33;color:#fff;' +
+        'font:11px/1.4 monospace;padding:1px 5px;border-radius:3px;pointer-events:none;';
+      var innerD = card.querySelector('.hx-cardinner');
+      var zD = innerD && innerD.style.zoom ? +(+innerD.style.zoom).toFixed(3) : 1;
+      tag.textContent = 'p' + (c + 1) + ' h=' + Math.round(card.scrollHeight) + ' z=' + zD;
+      card.appendChild(tag);
+      // 문단·표 경계
+      var els = card.querySelectorAll('.hx-p, table');
+      for (var k = 0; k < els.length; k++) {
+        var el = els[k], isTbl = el.tagName === 'TABLE';
+        el.style.outline = '1px dashed ' + (isTbl ? 'rgba(0,120,255,.55)' : 'rgba(255,80,80,.45)');
+        el.setAttribute('data-dbgmark', '1');
+        if (el.dataset && el.dataset.y0 !== undefined) {
+          var er = el.getBoundingClientRect();
+          var lab = document.createElement('div');
+          lab.className = 'hx-dbg';
+          lab.style.cssText = 'position:absolute;z-index:9;background:rgba(0,0,0,.62);color:#9fe;' +
+            'font:10px/1.3 monospace;padding:0 3px;pointer-events:none;' +
+            'left:2px;top:' + Math.round(er.top - cr.top) + 'px;';
+          lab.textContent = 'y0=' + el.dataset.y0;
+          card.appendChild(lab);
+        }
+      }
+    }
+  });
+
   window.addEventListener('keydown', function (e) {           // Ctrl +/−/0
     if (!e.ctrlKey || hxScroll.style.display !== 'block') return;
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomMode = 'pct'; fitMode = false; setZoom(zoom + 0.1); saveZoom(); }
