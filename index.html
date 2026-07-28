@@ -121,7 +121,7 @@
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v33</span></h1>
+    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v34</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -1623,8 +1623,19 @@ cfb/cfb.js:
           if (c.colSpan > 1) td.colSpan = c.colSpan;
           if (c.rowSpan > 1) td.rowSpan = c.rowSpan;
           if (c.height > 0 && c.height < 500000) td.style.height = (c.height * U2PX) + 'px';
-          if (c.pad) td.style.padding = (Math.max(0, c.pad[2]) * U2PX) + 'px ' + (Math.max(0, c.pad[1]) * U2PX) + 'px ' +
-            (Math.max(0, c.pad[3]) * U2PX) + 'px ' + (Math.max(0, c.pad[0]) * U2PX) + 'px';
+          if (c.pad) {
+            var padL = Math.max(0, c.pad[0]) * U2PX, padR = Math.max(0, c.pad[1]) * U2PX;
+            // 좌우 여백 합이 셀 폭에 육박하면 글자가 놓일 자리가 없어져 밖으로 밀린다 → 폭에 맞춰 제한
+            if (c.width > 0) {
+              var wpx = c.width * U2PX, room = wpx - 2;
+              if (padL + padR > room) {
+                var sc = room > 0 ? room / (padL + padR) : 0;
+                padL = Math.max(0, padL * sc); padR = Math.max(0, padR * sc);
+              }
+            }
+            td.style.padding = (Math.max(0, c.pad[2]) * U2PX) + 'px ' + padR + 'px ' +
+              (Math.max(0, c.pad[3]) * U2PX) + 'px ' + padL + 'px';
+          }
           cellBorder(td, ctx.info.borderFills[c.borderFillId]);
           var cfs = { prevEnd: null };
           c.paras.forEach(function (p) {
@@ -1996,6 +2007,7 @@ cfb/cfb.js:
     currentBinary = null;
     zoombox.style.display = 'none'; badge.style.display = 'none';
     drop.style.display = 'flex'; fname.textContent = '';
+    try { document.title = BASE_TITLE; } catch (eT2) {}
     setZoom(1);
   }
 
@@ -2051,14 +2063,36 @@ cfb/cfb.js:
         w.style.display = 'inline-block';
         w.style.whiteSpace = 'pre';
         w.style.transformOrigin = 'left top';
+        // 줄 상자의 pre는 래퍼가 대신 유지한다. 줄에 pre가 남으면 래퍼가 줄 밖으로 밀려나고,
+        // 그렇다고 normal로 두면 래퍼가 아래 줄로 내려가 겹친다 → 줄바꿈 자체를 금지해 한 줄에 고정.
+        l.style.whiteSpace = 'nowrap';
+        l.style.overflow = 'visible';
       }
       w.style.transform = '';
-      var wrect = w.getBoundingClientRect();
-      var padRight = parseFloat(getComputedStyle(l).paddingRight) || 0;
-      var avail = (lrect.right - padRight) - wrect.left;
-      var need = Math.max(w.scrollWidth, rightEdge(w) - wrect.left, wrect.width);
-      if (need > avail + 1 && avail > 4)
-        w.style.transform = 'scaleX(' + (avail / need).toFixed(4) + ')';
+      // 래퍼가 줄 안 어디에 놓였든 상관없이 '줄의 내용 폭'과 '래퍼가 필요로 하는 폭'만으로 계산한다.
+      // (정렬·공백 처리 때문에 래퍼가 줄 오른쪽 밖에서 시작하는 경우가 있어 위치 기준은 신뢰할 수 없음)
+      var csL = getComputedStyle(l);
+      var avail = l.clientWidth - (parseFloat(csL.paddingLeft) || 0) - (parseFloat(csL.paddingRight) || 0);
+      // 표 셀 안이면 셀의 실제 안쪽 폭이 진짜 한계 (줄 폭이 셀보다 크게 잡히는 경우가 있음)
+      var tdL = l.closest ? l.closest('td') : null;
+      if (tdL) {
+        var csT = getComputedStyle(tdL);
+        var innerT = tdL.clientWidth - (parseFloat(csT.paddingLeft) || 0) - (parseFloat(csT.paddingRight) || 0);
+        if (innerT > 0 && innerT < avail) avail = innerT;
+      }
+      var wrect0 = w.getBoundingClientRect();
+      var need = Math.max(w.scrollWidth, rightEdge(w) - wrect0.left, wrect0.width);
+      if (need > avail + 1 && avail > 0.5)
+        w.style.transform = 'scaleX(' + Math.max(0.05, avail / need).toFixed(4) + ')';
+      // 래퍼가 줄 밖으로 밀려 시작하면 왼쪽 끝으로 되돌린다 (글자가 쪽 밖으로 나가는 것 방지)
+      var wr2 = w.getBoundingClientRect(), lr2 = l.getBoundingClientRect();
+      var slip = wr2.left - (lr2.left + (parseFloat(csL.paddingLeft) || 0));
+      if (slip > 1) {
+        w.style.position = 'relative';
+        w.style.left = (-slip).toFixed(2) + 'px';
+      } else if (w.style.left) {
+        w.style.position = ''; w.style.left = '';
+      }
     }
   }
   var fitTimer = null;
@@ -2214,10 +2248,19 @@ cfb/cfb.js:
   }
 
   // 렌더러가 만든 카드가 크게 넘칠 때(장문 표 등) 행 단위로 뒤 카드에 이어붙임
+  // 분할로 새로 생긴 카드도 다시 검사해야 하므로 여러 번 반복 (더 나눌 것이 없으면 종료)
   function repairOverflow(root, contentHpx) {
-    var sec = root.querySelector('.hx-section') || root;
-    var cards = Array.prototype.slice.call(sec.querySelectorAll('.hx-pagecard'));
-    var limit = contentHpx * 1.25;          // 미세 축소로 봉인 가능한 범위(~20%)는 건드리지 않음 — 진짜 장문 표만 분할
+    for (var pass = 0; pass < 5; pass++) {
+      var before = root.querySelectorAll('.hx-pagecard').length;
+      repairOverflowPass(root, contentHpx);
+      if (root.querySelectorAll('.hx-pagecard').length === before) break;
+    }
+  }
+
+  function repairOverflowPass(root, contentHpx) {
+    // 문서에 섹션이 여러 개면 첫 섹션만 보면 안 된다 (나머지 쪽이 통째로 검사에서 빠짐)
+    var cards = Array.prototype.slice.call(root.querySelectorAll('.hx-pagecard'));
+    var limit = contentHpx * 1.30;          // 미세 축소로 봉인 가능한 범위(~20%)는 건드리지 않음 — 진짜 장문 표만 분할
     var mk = function (ref) {
       var c = document.createElement('div');
       c.className = 'hx-pagecard';
@@ -2228,9 +2271,14 @@ cfb/cfb.js:
     };
     for (var ci = 0; ci < cards.length; ci++) {
       var card = cards[ci];
-      var cs = getComputedStyle(card);
-      var padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
-      if (card.scrollHeight - padY <= limit) continue;   // 여백 제외한 '내용 높이' 기준
+      // 카드 높이는 A4 최소높이에 가려지므로 '자식 높이 합'으로 실제 내용량을 잰다
+      var sumH = 0;
+      for (var sm = 0; sm < card.children.length; sm++) {
+        var kdS = card.children[sm];
+        if (kdS.style && kdS.style.position === 'absolute') continue;
+        sumH += kdS.offsetHeight + (parseFloat(getComputedStyle(kdS).marginTop) || 0);
+      }
+      if (sumH <= limit) continue;
       var units = Array.prototype.slice.call(card.children);
       var target = card, used = 0, guard = 0;
       for (var ui = 0; ui < units.length; ui++) {
@@ -2399,6 +2447,8 @@ cfb/cfb.js:
     }
   }
 
+  var BASE_TITLE = document.title;
+
   function showPaged(info, badgeText) {
     blobUrls = info.urls || [];
     var pi = info.pageInfo;
@@ -2467,6 +2517,38 @@ cfb/cfb.js:
         if (!cd.textContent.trim() && !cd.querySelector('table,img,svg') &&
             hxPage.querySelectorAll('.hx-pagecard').length > 1) cd.remove();
       }
+    }
+    // 셀 안 줄 들여쓰기 보정: 들여쓰기가 셀 안쪽 폭을 넘으면 글자가 시작도 못 하고 밖으로 밀린다
+    var tdsInd = hxPage.querySelectorAll('td');
+    var indFix = [];
+    for (var ti = 0; ti < tdsInd.length; ti++) {
+      var tdI = tdsInd[ti], csI = getComputedStyle(tdI);
+      var innerI = tdI.clientWidth - (parseFloat(csI.paddingLeft) || 0) - (parseFloat(csI.paddingRight) || 0);
+      if (innerI > 60) continue;                       // 넉넉한 셀은 대상 아님
+      var lnsI = tdI.querySelectorAll('.hx-seg > div');
+      for (var li = 0; li < lnsI.length; li++) {
+        var plI = parseFloat(lnsI[li].style.paddingLeft) || 0;
+        if (plI > 0 && plI > innerI - 2) indFix.push([lnsI[li], Math.max(0, innerI - 2)]);
+      }
+    }
+    for (var ifx = 0; ifx < indFix.length; ifx++)
+      indFix[ifx][0].style.paddingLeft = indFix[ifx][1].toFixed(2) + 'px';
+    // 셀 여백 실측 보정: 좌우 여백 합이 실제 셀 폭에 육박하면 글자 자리가 없어 밖으로 밀린다
+    var tdsPad = hxPage.querySelectorAll('td');
+    var padFix = [];
+    for (var pi2 = 0; pi2 < tdsPad.length; pi2++) {
+      var tdP = tdsPad[pi2], csP = getComputedStyle(tdP);
+      var pl = parseFloat(csP.paddingLeft) || 0, pr = parseFloat(csP.paddingRight) || 0;
+      if (pl + pr < 1) continue;
+      var inner = tdP.clientWidth - pl - pr;
+      if (inner < 6) padFix.push([tdP, pl, pr, tdP.clientWidth]);
+    }
+    for (var pf = 0; pf < padFix.length; pf++) {
+      var tdF = padFix[pf][0], plF = padFix[pf][1], prF = padFix[pf][2], wF = padFix[pf][3];
+      var roomF = Math.max(0, wF - 6);
+      var scF = (plF + prF) > 0 ? roomF / (plF + prF) : 0;
+      tdF.style.paddingLeft = (plF * scF).toFixed(2) + 'px';
+      tdF.style.paddingRight = (prF * scF).toFixed(2) + 'px';
     }
     // 셀 지정높이 자가검증: 내용보다 '한 쪽 이상' 큰 높이는 성립 불가 → 해제 (빈 표·유령 여백 방지)
     // 최적화: 지정높이가 한 쪽보다 큰 셀만 후보 → 측정 대상을 수천 개에서 수 개로 줄임
@@ -2570,7 +2652,7 @@ cfb/cfb.js:
       // 내용이 인쇄 영역을 넘으면 그만큼만 미세 축소 (카드는 A4 크기 유지 → 화면·인쇄 동일)
       if (ih > contentHpx2 + 2) {
         var z = contentHpx2 / ih;
-        if (z > 0.8) innersF[wf].style.zoom = z.toFixed(4);   // 20%까지만; 그 이상은 구조 문제이므로 드러냄
+        if (z > 0.76) innersF[wf].style.zoom = z.toFixed(4);   // 24%까지만; 그 이상은 구조 문제이므로 드러냄
       }
     }
     // 각주·미주 쪽 하단 정렬 (한글은 본문 아래 쪽 밑단에 배치)
@@ -2848,6 +2930,9 @@ cfb/cfb.js:
     reset();
     setLoading(true, '문서 읽는 중… (' + (file.size / 1024).toFixed(0) + ' KB)');
     fname.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+    // PDF로 저장할 때 브라우저는 '문서 제목'을 기본 파일명·속성으로 쓴다.
+    // 기본값(뷰어 이름)이면 저장한 PDF가 전부 같은 이름이 되므로 원본 파일명으로 바꾼다.
+    try { document.title = file.name.replace(/\.(hwp|hwpx)$/i, ''); } catch (eT) {}
     var r = new FileReader();
     r.onload = function (ev) {
       var u8 = new Uint8Array(ev.target.result);
