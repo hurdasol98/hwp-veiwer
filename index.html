@@ -124,7 +124,7 @@
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v35</span></h1>
+    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v36</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -446,6 +446,9 @@ cfb/cfb.js:
   function renderTable(tbl, ctx, env) {
     var table = env.doc.createElement('table');
     table.className = 'hx-tbl';
+    // 쪽 나눔 지정: NONE=나누지 않음 / TABLE·CELL=나눌 수 있음 (셸의 분할 판단에 쓰임)
+    var pbAttr = String(attr(tbl, 'pageBreak', 'CELL')).toUpperCase();
+    table.setAttribute('data-split', pbAttr === 'NONE' ? '0' : '2');
     var tblBf = ctx.borderFill[attr(tbl, 'borderFillIDRef', '')];
     // 열 너비 확정 (L8): cellAddr/cellSpan/cellSz 기반 colgroup
     (function () {
@@ -2168,7 +2171,10 @@ cfb/cfb.js:
           used += lh;
         }
       } else {
-        if (hasReal) {
+        var tblPre = el.querySelector && el.querySelector('table');
+        var canSplitHere = tblPre && tblPre.getAttribute('data-split') !== '0' &&
+                           tblPre.rows.length > 2 && (contentHpx - used > 60);
+        if (hasReal && !canSplitHere) {          // 나눌 수 있는 표는 새 쪽을 열지 않고 이번 쪽부터 채운다
           // keep-with-next: 직전 짧은 제목(seg)이 홀로 남으면 함께 넘김
           var prevCard = card;
           var orphan = card.lastElementChild;
@@ -2181,17 +2187,30 @@ cfb/cfb.js:
           }
         }
         var tbl = el.querySelector && el.querySelector('table');
-        if (tbl && h > contentHpx + 2 && !tbl.querySelector('[rowspan]:not([rowspan="1"])')) {
-          // 페이지 초과 표: 행 단위 분할 (병합 없는 표만)
+        // 남은 자리에 안 들어가는 표는 통째로 넘기지 말고 행 단위로 나눠 이번 쪽부터 채운다.
+        // (원본 한글도 그렇게 배치한다. 통째로 넘기면 앞 쪽이 크게 비어 보임)
+        var splitOK = tbl && tbl.getAttribute('data-split') !== '0' && tbl.rows.length > 2;
+        if (splitOK && (h > contentHpx + 2 || contentHpx - used > 60)) {
+          // 행 단위 분할 (병합 없고 파일이 나눔을 허용한 표만)
           tbl.style.height = ''; el.style.height = '';
           card.appendChild(el); used += hOf(el) - tbl.offsetHeight;
           var rows = Array.prototype.slice.call(tbl.rows);
           var rowH = [];
           for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].offsetHeight);   // 이동 전 일괄 측정
+          // 병합이 걸쳐 있는 행에서는 자를 수 없다 → 병합이 열려 있지 않은 행만 분할점
+          var safeR = new Array(rows.length).fill(true), openTo = 0;
+          for (var sr2 = 0; sr2 < rows.length; sr2++) {
+            if (sr2 < openTo) safeR[sr2] = false;
+            var cls2 = rows[sr2].cells;
+            for (var sc2 = 0; sc2 < cls2.length; sc2++) {
+              var rs2 = parseInt(cls2[sc2].getAttribute('rowspan') || '1', 10) || 1;
+              if (sr2 + rs2 > openTo) openTo = sr2 + rs2;
+            }
+          }
           var shell = tbl;
           for (var ri2 = 0; ri2 < rows.length; ri2++) {
-            var rh = rows[ri2].offsetHeight;
-            if (rh > contentHpx - used + 8 && shell.rows.length) {
+            var rh = rowH[ri2];
+            if (rh > contentHpx - used + 8 && shell.rows.length && safeR[ri2]) {
               newCard();
               var t2 = tbl.cloneNode(false);
               t2.style.cssText = tbl.style.cssText;
