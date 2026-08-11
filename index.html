@@ -124,7 +124,7 @@
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <small style="font-size:10px;color:#5b6activity"></small><span style="font-size:10px;color:#6b7484">v36</span></h1>
+    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v39</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -610,11 +610,14 @@ cfb/cfb.js:
 
   function renderParagraphSeg(p, ctx, env, segs, flowState, pager) {
     var pp = ctx.paraPr[attr(p, 'paraPrIDRef', '')];
+    var pgBrk = attr(p, 'pageBreak', '0') === '1';
     var align = pp ? pp.align : 'justify';
+    var first = true;
     var mkDiv = function () {
       var d = env.doc.createElement('div');
       d.className = 'hx-p hx-seg';
       d.style.minHeight = '0';
+      if (pgBrk && first) { d.setAttribute('data-pagebreak', '1'); first = false; }
       if (pp && pp.left) d.style.marginLeft = pp.left + 'px';
       return d;
     };
@@ -726,8 +729,10 @@ cfb/cfb.js:
   }
 
   function renderParagraph(p, ctx, env) {
+    var pgBrk2 = attr(p, 'pageBreak', '0') === '1';
     var div = env.doc.createElement('div');
     div.className = 'hx-p';
+    if (pgBrk2) div.setAttribute('data-pagebreak', '1');   // 파일이 지정한 '쪽 나누기'
     var pp = ctx.paraPr[attr(p, 'paraPrIDRef', '')];
     if (pp) {
       div.style.textAlign = pp.align;
@@ -867,12 +872,20 @@ cfb/cfb.js:
       childrenByLn(root, 'p').forEach(function (p) {
         var segs = parseSegs(p);
         var hasY = segs.length > 0;
-        if (hasY && prevRawEnd >= 0 && segs[0].y + 0.5 < prevRawEnd) flowState.prevEnd = null; // 새 배치 흐름
+        // 줄 좌표가 앞줄보다 '충분히' 위로 되돌아가면 새 쪽 시작 신호.
+        // 단 표·글상자 안 문단은 자체 좌표계라 늘 0에서 시작하므로 제외하고,
+        // 되돌아간 폭이 작으면(같은 쪽 안의 배치 차이) 쪽 나누기로 보지 않는다.
+        var yReset = hasY && prevRawEnd >= 0 && segs[0].y + 0.5 < prevRawEnd &&
+                     (prevRawEnd - segs[0].y) > 120 && !p.parentNode.closest('tbl, tc, subList');
+        if (yReset) flowState.prevEnd = null; // 새 배치 흐름
         if (hasY) prevRawEnd = segs[segs.length - 1].y + segs[segs.length - 1].box;
         if (segEligible(p, segs)) {
-          secDiv.appendChild(renderParagraphSeg(p, ctx, env, segs, flowState));
+          var segEl = renderParagraphSeg(p, ctx, env, segs, flowState);
+          if (yReset && segEl.setAttribute) segEl.setAttribute('data-pagebreak', '1');
+          secDiv.appendChild(segEl);
         } else {
           var el = renderParagraph(p, ctx, env);
+          if (yReset) el.setAttribute('data-pagebreak', '1');
           if (hasY) {
             var startRef = (flowState.prevEnd !== null) ? flowState.prevEnd : segs[0].y;
             var gap = segs[0].y - startRef;
@@ -1109,7 +1122,7 @@ cfb/cfb.js:
                 lv2.i32(); lv2.i32();              // textHeight, baseline
                 var sSp = lv2.i32() / 100;         // 줄 아래 간격 (pt)
                 var sX = lv2.i32() / 7200 * 72;    // 들여 (pt)
-                lv2.i32(); if (c.payload.byteLength - si * 36 >= 36) lv2.u32(); // width, tag
+                lv2.i32(); lv2.u32();   // width, tag (nseg=floor(len/36)이므로 항상 존재)
                 var lastSeg = para.segs[para.segs.length - 1];
                 if (lastSeg && Math.abs(sY - lastSeg.y) < 0.01) lastSeg.subs.push({ pos: sPos, x: sX });
                 else para.segs.push({ pos: sPos, h: sH, box: sH + sSp, x: sX, y: sY, subs: [{ pos: sPos, x: sX }] });
@@ -1282,7 +1295,7 @@ cfb/cfb.js:
           // 머리말·꼬리말: 본문과 별도 영역에 그리도록 수집 (적용 쪽 구분은 payload 첫 바이트)
           var hps = [];
           var applyTo = 0;                       // 0 양쪽 / 1 짝수 / 2 홀수
-          try { applyTo = BR(r.payload).skip(4).u8() & 3; } catch (eh) {}
+          try { var hbR = BR(r.payload); hbR.skip(4); applyTo = hbR.u8() & 3; } catch (eh) {}
           while (pos < rs.length && rs[pos].level > level) {
             var c4 = rs[pos];
             if (c4.tag === T.LIST_HEADER) { var lv3 = c4.level; pos++; collectParas(lv3, hps); }
@@ -1804,7 +1817,7 @@ cfb/cfb.js:
       var pager = {
         lastEnd: -1,
         shouldBreak: function (y) { return this.lastEnd >= 0 && y + 0.5 < this.lastEnd; },
-        mark: function (end) { if (end > this.lastEnd) this.lastEnd = end; else this.lastEnd = end; },
+        mark: function (end) { if (end > this.lastEnd) this.lastEnd = end; },
         page: function () { openPage(); this.lastEnd = -1; return pageDiv; },
         cur: function () { return pageDiv; }
       };
@@ -1888,7 +1901,8 @@ cfb/cfb.js:
   var hxScroll = $('hxScroll'), hxZoom = $('hxZoom'), hxPage = $('hxPage');
   var binWrap = $('binWrap'), binViewer = $('binViewer');
   var fname = $('fname'), badge = $('badge'), fileInput = $('fileInput');
-  fontBadgeEl = $('fontBadge');
+  var fontBadgeEl = $('fontBadge');   // 암묵 전역 방지
+  var zoombox = $('zoombox');          // 암묵 전역 의존 제거
   // 저장된 글꼴 자동 복원
   idbAll().then(function (rows) {
     rows.forEach(function (r) { registerFont(r.name, r.buf, false).catch(function () {}); });
@@ -1978,7 +1992,7 @@ cfb/cfb.js:
       scheduleFit();
     });
   }
-  var fontBadgeEl = null;
+  // fontBadgeEl 은 위에서 이미 잡아둔다 (여기서 var로 다시 선언하면 그 값이 지워짐)
   function updateFontBadge() {
     if (!fontBadgeEl) return;
     if (userFonts.length) {
@@ -2108,9 +2122,15 @@ cfb/cfb.js:
   }
 
   // 렌더러가 카드를 안 만든 경우(HWPX): 실측 높이 기반 페이지 분할 (줄 단위)
+  // 구역(섹션)이 여러 개면 각각 따로 배치한다 (첫 구역만 처리하면 뒤 구역은 쪽이 안 생김)
   function paginate(root, contentHpx) {
     if (root.querySelector('.hx-pagecard')) return;
-    var sec = root.querySelector('.hx-section') || root;
+    var secs = Array.prototype.slice.call(root.querySelectorAll('.hx-section'));
+    if (!secs.length) secs = [root];
+    for (var si2 = 0; si2 < secs.length; si2++) paginateSection(secs[si2], contentHpx);
+  }
+
+  function paginateSection(sec, contentHpx) {
     var src = Array.prototype.slice.call(sec.children);
     var card = null, used = 0, hasReal = false;
     var newCard = function () {
@@ -2131,15 +2151,27 @@ cfb/cfb.js:
     for (var i = 0; i < src.length; i++) {
       var el = src[i];
       var h = hOf(el);
+      // 파일이 '이 문단부터 새 쪽'이라고 지정한 경우 그대로 따른다
+      if (el.dataset && el.dataset.pagebreak === '1' && hasReal) newCard();
       var voff = (el.dataset && el.dataset.voff) ? parseFloat(el.dataset.voff) : null;
       if (voff !== null) {                       // 페이지 기준 절대배치: 흐름과 무관하게 카드에 부유
+        // 이 쪽에 이미 다른 개체가 같은 자리에 있으면 새 쪽에서 시작 (표지가 앞 쪽에 겹쳐 얹히는 것 방지)
+        if (hasReal && voff <= (card.__lastVoff != null ? card.__lastVoff : -1)) newCard();
+        card.__lastVoff = voff;
+        // 개체가 쪽 아래로 넘치면 쪽 안으로 끌어올린다 (카드가 A4보다 커지는 것 방지)
+        var maxTop = contentHpx - el.offsetHeight;
+        if (voff > maxTop) voff = Math.max(0, maxTop);
         card.style.position = 'relative';
         el.style.position = 'absolute';
-        el.style.top = 'calc(' + voff + 'px + var(--hx-padtop, 0px))';
         el.style.left = '0';
         el.style.right = '0';
         el.style.marginTop = '0';
         card.appendChild(el);
+        // 쪽 밖으로 벗어나면 쪽 안으로 당긴다 (개체 오프셋이 문단 전체에 적용돼 A4를 넘는 경우 방지)
+        var vTop = voff, hAbs = el.offsetHeight;
+        if (hAbs >= contentHpx) vTop = 0;
+        else if (vTop + hAbs > contentHpx) vTop = Math.max(0, contentHpx - hAbs);
+        el.style.top = 'calc(' + vTop + 'px + var(--hx-padtop, 0px))';
         markReal(el);
         continue;
       }
@@ -2210,7 +2242,9 @@ cfb/cfb.js:
           var shell = tbl;
           for (var ri2 = 0; ri2 < rows.length; ri2++) {
             var rh = rowH[ri2];
-            if (rh > contentHpx - used + 8 && shell.rows.length && safeR[ri2]) {
+            // 이 행을 넣으면 쪽을 넘는가? 넘는다면 '이번 행이 안전점일 때' 여기서 끊는다.
+            // (예전에는 행 자체가 쪽보다 클 때만 끊어서, 큰 행 앞에서 못 끊고 통째로 넘쳤다)
+            if (used + rh > contentHpx - 8 && shell.rows.length && safeR[ri2]) {
               newCard();
               var t2 = tbl.cloneNode(false);
               t2.style.cssText = tbl.style.cssText;
@@ -2501,10 +2535,15 @@ cfb/cfb.js:
     }
     var wmm = (pi.w * info.U2MM).toFixed(1), hmm = (pi.h * info.U2MM).toFixed(1);
     $('pageStyle').textContent =
-      '@media print { @page { size: ' + wmm + 'mm ' + hmm + 'mm; ' +
-      'margin: ' + (pi.mt * info.U2MM).toFixed(1) + 'mm ' + (pi.mr * info.U2MM).toFixed(1) + 'mm ' + (pi.mb * info.U2MM).toFixed(1) + 'mm ' + (pi.ml * info.U2MM).toFixed(1) + 'mm; } ' +
-      '.hx-page, .hx-pagecard { padding: 0 !important; min-height: 0 !important; width: auto !important; box-shadow: none !important; margin: 0 !important; } ' +
-      '.hx-pagecard { break-after: page; page-break-after: always; height: ' + contentHmm + 'mm !important; overflow: hidden !important; } ' +
+      // 여백은 '카드 패딩' 한 곳에서만 준다. @page에도 주면 이중 적용되어 쪽마다 아래가 잘린다.
+      // 따라서 @page는 여백 0 + 용지 전체 크기, 카드는 용지 전체 높이(패딩 포함, border-box)로 맞춘다.
+      '@media print { @page { size: ' + wmm + 'mm ' + hmm + 'mm; margin: 0; } ' +
+      '.hx-page { padding: 0 !important; min-height: 0 !important; width: auto !important; box-shadow: none !important; margin: 0 !important; } ' +
+      '.hx-pagecard { min-height: 0 !important; box-shadow: none !important; margin: 0 !important; ' +
+        'width: ' + wmm + 'mm !important; ' +
+        'padding: ' + (pi.mt * info.U2MM).toFixed(2) + 'mm ' + (pi.mr * info.U2MM).toFixed(2) + 'mm ' +
+                      (pi.mb * info.U2MM).toFixed(2) + 'mm ' + (pi.ml * info.U2MM).toFixed(2) + 'mm !important; } ' +
+      '.hx-pagecard { break-after: page; page-break-after: always; height: ' + hmm + 'mm !important; overflow: hidden !important; } ' +
       '.hx-pagecard.hx-tall { height: auto !important; overflow: visible !important; } ' +
       '.hx-pagecard:last-child { break-after: auto; page-break-after: auto; } }';
     drop.style.display = 'none';
@@ -2883,7 +2922,14 @@ cfb/cfb.js:
         });
       });
     });
-    chain.then(function () { if (docs.length) openFile(docs[0]); });
+    chain.then(function () {
+      if (!docs.length) return;
+      openFile(docs[0]);
+      // 문서를 여러 개 떨어뜨리면 첫 개만 열린다는 점을 알린다 (조용히 무시하지 않도록)
+      if (docs.length > 1) setTimeout(function () {
+        try { fname.textContent += '  · 첫 번째 문서만 열림 (' + docs.length + '개 중)'; } catch (e) {}
+      }, 800);
+    });
   }
 
   function setLoading(on, msg) {
@@ -2965,7 +3011,8 @@ cfb/cfb.js:
         registerFont(fn, ev.target.result, true).then(function () {
           fname.textContent = '글꼴 등록됨: ' + fn;
           drop.style.display = 'flex';
-        }).catch(function (e) { fail('글꼴 등록 실패', e.message); });
+        }).catch(function (e) { fail('글꼴 등록 실패', e.message); })
+          .then(function () { setLoading(false); busy = false; });   // 화면이 잠기지 않도록 반드시 해제
         return;
       }
       if (u8[0] === 0x50 && u8[1] === 0x4B) {           // PK → zip → HWPX
