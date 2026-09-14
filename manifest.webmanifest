@@ -1,12 +1,12 @@
 {
   "name": "HWP 뷰어",
   "short_name": "HWP 뷰어",
-  "description": "설치 없이 HWP/HWPX 문서를 열람하고 PDF로 저장. 문서는 브라우저 안에서만 처리되며 외부로 전송되지 않습니다.",
-  "start_url": "./index.html",
+  "description": "오프라인 한글 뷰어 v41 · 문서 검색, 쪽 이동, 텍스트 저장",
+  "start_url": "./index-1.html",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0b0f16",
-  "theme_color": "#0b0f16",
+  "background_color": "#171e2b",
+  "theme_color": "#101724",
   "lang": "ko",
   "icons": [
     {
@@ -21,5 +21,6 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "id": "./"
 }

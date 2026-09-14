@@ -121,10 +121,37 @@
 <style id="pageStyle"></style>
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#0b0f16">
+
+<style>
+body {background:#171e2b;color:#edf2fa;}
+header.app {padding:14px 20px;gap:10px;background:#101724;}
+header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
+.btn {min-height:40px;font-size:14px;border-radius:8px;}
+.btn:focus-visible, input:focus-visible, #drop:focus-visible {outline:3px solid #80bbff;outline-offset:3px;}
+.badge,.fname,.hint {font-size:14px;}
+#drop {margin:clamp(16px,5vw,64px);border:1px dashed #526480;background:#1c2738;min-height:280px;padding:28px;}
+#drop .big {font-size:clamp(21px,3vw,30px);text-align:center;line-height:1.5;}
+#drop .sub {font-size:16px;max-width:600px;line-height:1.9;}
+#docTools {display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 20px;background:#1c2738;border-bottom:1px solid #35445c;}
+#docTools[hidden] {display:none;}
+#docTools input {background:#101724;color:#fff;border:1px solid #50617a;border-radius:7px;padding:9px;font-size:16px;min-width:0;}
+#searchText {width:clamp(140px,25vw,300px);}
+#pageNumber {width:68px;text-align:center;}
+#searchCount,#pageTotal {font-size:14px;color:#b8c7dd;}
+.toolGroup {display:flex;align-items:center;gap:6px;}
+#appStatus {font-size:14px;color:#b5c8e1;padding:10px 20px;background:#101724;}
+#hxScroll {overscroll-behavior:contain;}
+#errbox {padding:24px;line-height:1.8;max-width:calc(100% - 32px);}
+::highlight(hxSearch) {background:#ffe089;color:#111;}
+::highlight(hxCurrent) {background:#ff9b38;color:#111;}
+@media(max-width:700px) {header.app {padding:10px;} #fname {max-width:none;flex-basis:100%;order:8;} #docTools {padding:10px;gap:8px;} #drop {margin:16px;padding:24px 16px;} #drop .sub {text-align:left;} .spacer {display:none;} #searchText {width:145px;} }
+@media(prefers-reduced-motion:reduce) {* {scroll-behavior:auto!important;} #loading .spin {animation:none;} }
+@media print {#docTools,#appStatus {display:none!important;} }
+</style>
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v39</span></h1>
+    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v41</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -150,23 +177,23 @@
     <button class="btn" id="btnReset" style="display:none">다른 파일</button>
   </header>
 
-  <div id="drop">
-    <div class="big">HWP / HWPX 파일을 여기에 끌어다 놓기</div>
-    <div class="sub">
-      또는 클릭하여 파일 선택 — 확장자와 무관하게 <b>실제 파일 형식 자동 판별</b><br>
-      · 무설치 단일 HTML · 오프라인 동작 · 파일 외부 전송 없음<br>
-      · HWP 5.x / HWPX 자체 렌더러 — 원본 줄·쪽 좌표 그대로 재현<br>
-      · 원본과 같은 쪽 나눔 · PDF 저장 시 쪽수 일치 · Ctrl+휠로 배율 조정<br>
-      · <b>글꼴 파일(ttf/otf)을 끌어넣으면 설치 없이 원본 글꼴로 표시</b> — 한 번 등록하면 계속 유지
-    </div>
+  <div id="drop" role="button" tabindex="0" aria-label="HWP 또는 HWPX 파일 선택">
+    <div class="big">한글 문서, 바로 열어보세요</div>
+    <div class="sub">HWP · HWPX 파일을 끌어놓거나 여기를 눌러 선택하세요.<br>문서는 이 기기에서 처리하며 외부로 전송하지 않습니다.<br><br>문서 검색 · 쪽 이동 · 텍스트 저장 · PDF 인쇄<br>글꼴이 다르면 TTF·OTF 파일을 함께 열어보세요.<br><span style="color:#a9b8cc">복잡한 표·도형은 원본과 다르게 표시될 수 있습니다.</span></div>
   </div>
 
+  <nav id="docTools" aria-label="문서 도구" hidden>
+    <div class="toolGroup"><button class="btn" id="pagePrev" aria-label="이전 쪽">‹</button><input id="pageNumber" type="number" min="1" value="1" aria-label="이동할 쪽"><span id="pageTotal"></span><button class="btn" id="pageNext" aria-label="다음 쪽">›</button></div>
+    <div class="toolGroup"><input id="searchText" type="search" placeholder="문서에서 찾기" aria-label="문서 검색"><button class="btn" id="searchPrev" aria-label="이전 검색 결과">↑</button><button class="btn" id="searchNext" aria-label="다음 검색 결과">↓</button><span id="searchCount" role="status"></span></div>
+    <button class="btn" id="saveText">텍스트 저장</button>
+  </nav>
   <div id="hxScroll"><div id="hxZoom"><div class="hx-page" id="hxPage"></div></div></div>
   <div id="binWrap"><div id="binViewer"></div></div>
 
   <div id="loading">
     <div class="spin"></div>
     <div id="loadmsg">문서 읽는 중…</div>
+    <button class="btn" id="cancelLoad">취소</button>
   </div>
 
   <div id="errbox">
@@ -175,9 +202,10 @@
     <span id="errguide"></span>
   </div>
 
+  <footer id="appStatus" role="status">파일을 선택하면 읽기를 시작합니다 · Ctrl+O 파일 열기</footer>
   <input type="file" id="fileInput" accept=".hwp,.hwpx,.ttf,.otf,.ttc" multiple>
 
-<script>
+<script id="hxBundle">
 (()=>{var ns=Object.create;var hi=Object.defineProperty;var as=Object.getOwnPropertyDescriptor;var fs=Object.getOwnPropertyNames;var ss=Object.getPrototypeOf,hs=Object.prototype.hasOwnProperty;var Mn=(e=>typeof require<"u"?require:typeof Proxy<"u"?new Proxy(e,{get:(i,t)=>(typeof require<"u"?require:i)[t]}):e)(function(e){if(typeof require<"u")return require.apply(this,arguments);throw Error('Dynamic require of "'+e+'" is not supported')});var os=(e,i,t)=>()=>{if(t)throw t[0];try{return e&&(i=e(e=0)),i}catch(r){throw t=[r],r}};var ls=(e,i)=>()=>{try{return i||e((i={exports:{}}).exports,i),i.exports}catch(t){throw i=0,t}},us=(e,i)=>{for(var t in i)hi(e,t,{get:i[t],enumerable:!0})},Gn=(e,i,t,r)=>{if(i&&typeof i=="object"||typeof i=="function")for(let n of fs(i))!hs.call(e,n)&&n!==t&&hi(e,n,{get:()=>i[n],enumerable:!(r=as(i,n))||r.enumerable});return e};var cs=(e,i,t)=>(t=e!=null?ns(ss(e)):{},Gn(i||!e||!e.__esModule?hi(t,"default",{value:e,enumerable:!0}):t,e)),vs=e=>Gn(hi({},"__esModule",{value:!0}),e);var Wn={};us(Wn,{default:()=>ji});var ji,Di=os(()=>{ji={}});var rs=ls((Dl,Un)=>{var Gt="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";function $f(e){for(var i="",t=0,r=0,n=0,a=0,h=0,o=0,E=0,_=0;_<e.length;)t=e.charCodeAt(_++),a=t>>2,r=e.charCodeAt(_++),h=(t&3)<<4|r>>4,n=e.charCodeAt(_++),o=(r&15)<<2|n>>6,E=n&63,isNaN(r)?o=E=64:isNaN(n)&&(E=64),i+=Gt.charAt(a)+Gt.charAt(h)+Gt.charAt(o)+Gt.charAt(E);return i}function Yf(e){var i="",t=0,r=0,n=0,a=0,h=0,o=0,E=0;e=e.replace(/[^\w\+\/\=]/g,"");for(var _=0;_<e.length;)a=Gt.indexOf(e.charAt(_++)),h=Gt.indexOf(e.charAt(_++)),t=a<<2|h>>4,i+=String.fromCharCode(t),o=Gt.indexOf(e.charAt(_++)),r=(h&15)<<4|o>>2,o!==64&&(i+=String.fromCharCode(r)),E=Gt.indexOf(e.charAt(_++)),n=(o&3)<<6|E,E!==64&&(i+=String.fromCharCode(n));return i}var ot=(function(){return typeof Buffer<"u"&&typeof process<"u"&&typeof process.versions<"u"&&!!process.versions.node})(),Nn=(function(){if(typeof Buffer<"u"){var e=!Buffer.from;if(!e)try{Buffer.from("foo","utf8")}catch{e=!0}return e?function(i,t){return t?new Buffer(i,t):new Buffer(i)}:Buffer.from.bind(Buffer)}return function(){}})();function Jf(e){if(ot){if(Buffer.alloc)return Buffer.alloc(e);var i=new Buffer(e);return i.fill(0),i}return typeof Uint8Array<"u"?new Uint8Array(e):new Array(e)}function Kf(e){return ot?Buffer.allocUnsafe?Buffer.allocUnsafe(e):new Buffer(e):typeof Uint8Array<"u"?new Uint8Array(e):new Array(e)}var gr=function(i){return ot?Nn(i,"binary"):i.split("").map(function(t){return t.charCodeAt(0)&255})},Jr=/\u0000/g,Hi=/[\u0001-\u0006]/g,bi=function(e){for(var i=[],t=0;t<e[0].length;++t)i.push.apply(i,e[0][t]);return i},Il=bi,zn=function(e,i,t){for(var r=[],n=i;n<t;n+=2)r.push(String.fromCharCode(Qf(e,n)));return r.join("").replace(Jr,"")},Bl=zn,Oi=function(e,i,t){for(var r=[],n=i;n<i+t;++n)r.push(("0"+e[n].toString(16)).slice(-2));return r.join("")},Hl=Oi,qf=function(e){if(Array.isArray(e[0]))return[].concat.apply([],e);var i=0,t=0;for(t=0;t<e.length;++t)i+=e[t].length;var r=new Uint8Array(i);for(t=0,i=0;t<e.length;i+=e[t].length,++t)r.set(e[t],i);return r},xr=qf;ot&&(zn=function(e,i,t){return Buffer.isBuffer(e)?e.toString("utf16le",i,t).replace(Jr,""):Bl(e,i,t)},Oi=function(e,i,t){return Buffer.isBuffer(e)?e.toString("hex",i,i+t):Hl(e,i,t)},bi=function(e){return e[0].length>0&&Buffer.isBuffer(e[0][0])?Buffer.concat(e[0]):Il(e)},gr=function(e){return Nn(e,"binary")},xr=function(e){return Buffer.isBuffer(e[0])?Buffer.concat(e):qf(e)});var bl=function(e,i){return e[i]},Qf=function(e,i){return e[i+1]*256+e[i]},Ol=function(e,i){var t=e[i+1]*256+e[i];return t<32768?t:(65535-t+1)*-1},Vf=function(e,i){return e[i+3]*(1<<24)+(e[i+2]<<16)+(e[i+1]<<8)+e[i]},yr=function(e,i){return(e[i+3]<<24)+(e[i+2]<<16)+(e[i+1]<<8)+e[i]};function es(e,i){var t,r,n=0;switch(e){case 1:t=bl(this,this.l);break;case 2:t=(i!=="i"?Qf:Ol)(this,this.l);break;case 4:t=yr(this,this.l);break;case 16:n=2,r=Oi(this,this.l,e)}return this.l+=e,n===0?t:r}var Ll=function(e,i,t){e[t]=i&255,e[t+1]=i>>>8&255,e[t+2]=i>>>16&255,e[t+3]=i>>>24&255},Ul=function(e,i,t){e[t]=i&255,e[t+1]=i>>8&255,e[t+2]=i>>16&255,e[t+3]=i>>24&255};function Nl(e,i,t){var r=0,n=0;switch(t){case"hex":for(;n<e;++n)this[this.l++]=parseInt(i.slice(2*n,2*n+2),16)||0;return this;case"utf16le":var a=this.l+e;for(n=0;n<Math.min(i.length,e);++n){var h=i.charCodeAt(n);this[this.l++]=h&255,this[this.l++]=h>>8}for(;this.l<a;)this[this.l++]=0;return this}switch(e){case 1:r=1,this[this.l]=i&255;break;case 2:r=2,this[this.l]=i&255,i>>>=8,this[this.l+1]=i&255;break;case 4:r=4,Ll(this,i,this.l);break;case-4:r=4,Ul(this,i,this.l);break}return this.l+=r,this}function ts(e,i){var t=Oi(this,this.l,e.length>>1);if(t!==e)throw new Error(i+"Expected "+e+" saw "+t);this.l+=e.length>>1}function Mt(e,i){e.l=i,e.read_shift=es,e.chk=ts,e.write_shift=Nl}function Et(e){var i=Jf(e);return Mt(i,0),i}var Xf=(function(){var e={};e.version="1.2.1";function i(){for(var O=0,ie=new Array(256),G=0;G!=256;++G)O=G,O=O&1?-306674912^O>>>1:O>>>1,O=O&1?-306674912^O>>>1:O>>>1,O=O&1?-306674912^O>>>1:O>>>1,O=O&1?-306674912^O>>>1:O>>>1,O=O&1?-306674912^O>>>1:O>>>1,O=O&1?-306674912^O>>>1:O>>>1,O=O&1?-306674912^O>>>1:O>>>1,O=O&1?-306674912^O>>>1:O>>>1,ie[G]=O;return typeof Int32Array<"u"?new Int32Array(ie):ie}var t=i();function r(O){var ie=0,G=0,fe=0,D=typeof Int32Array<"u"?new Int32Array(4096):new Array(4096);for(fe=0;fe!=256;++fe)D[fe]=O[fe];for(fe=0;fe!=256;++fe)for(G=O[fe],ie=256+fe;ie<4096;ie+=256)G=D[ie]=G>>>8^O[G&255];var de=[];for(fe=1;fe!=16;++fe)de[fe-1]=typeof Int32Array<"u"?D.subarray(fe*256,fe*256+256):D.slice(fe*256,fe*256+256);return de}var n=r(t),a=n[0],h=n[1],o=n[2],E=n[3],_=n[4],m=n[5],H=n[6],B=n[7],z=n[8],ee=n[9],q=n[10],oe=n[11],J=n[12],ge=n[13],he=n[14];function ue(O,ie){for(var G=ie^-1,fe=0,D=O.length;fe<D;)G=G>>>8^t[(G^O.charCodeAt(fe++))&255];return~G}function V(O,ie){for(var G=ie^-1,fe=O.length-15,D=0;D<fe;)G=he[O[D++]^G&255]^ge[O[D++]^G>>8&255]^J[O[D++]^G>>16&255]^oe[O[D++]^G>>>24]^q[O[D++]]^ee[O[D++]]^z[O[D++]]^B[O[D++]]^H[O[D++]]^m[O[D++]]^_[O[D++]]^E[O[D++]]^o[O[D++]]^h[O[D++]]^a[O[D++]]^t[O[D++]];for(fe+=15;D<fe;)G=G>>>8^t[(G^O[D++])&255];return~G}function ve(O,ie){for(var G=ie^-1,fe=0,D=O.length,de=0,me=0;fe<D;)de=O.charCodeAt(fe++),de<128?G=G>>>8^t[(G^de)&255]:de<2048?(G=G>>>8^t[(G^(192|de>>6&31))&255],G=G>>>8^t[(G^(128|de&63))&255]):de>=55296&&de<57344?(de=(de&1023)+64,me=O.charCodeAt(fe++)&1023,G=G>>>8^t[(G^(240|de>>8&7))&255],G=G>>>8^t[(G^(128|de>>2&63))&255],G=G>>>8^t[(G^(128|me>>6&15|(de&3)<<4))&255],G=G>>>8^t[(G^(128|me&63))&255]):(G=G>>>8^t[(G^(224|de>>12&15))&255],G=G>>>8^t[(G^(128|de>>6&63))&255],G=G>>>8^t[(G^(128|de&63))&255]);return~G}return e.table=t,e.bstr=ue,e.buf=V,e.str=ve,e})(),mr=(function(){var i={};i.version="1.2.2";function t(f,c){for(var l=f.split("/"),u=c.split("/"),p=0,w=0,k=Math.min(l.length,u.length);p<k;++p){if(w=l[p].length-u[p].length)return w;if(l[p]!=u[p])return l[p]<u[p]?-1:1}return l.length-u.length}function r(f){if(f.charAt(f.length-1)=="/")return f.slice(0,-1).indexOf("/")===-1?f:r(f.slice(0,-1));var c=f.lastIndexOf("/");return c===-1?f:f.slice(0,c+1)}function n(f){if(f.charAt(f.length-1)=="/")return n(f.slice(0,-1));var c=f.lastIndexOf("/");return c===-1?f:f.slice(c+1)}function a(f,c){typeof c=="string"&&(c=new Date(c));var l=c.getHours();l=l<<6|c.getMinutes(),l=l<<5|c.getSeconds()>>>1,f.write_shift(2,l);var u=c.getFullYear()-1980;u=u<<4|c.getMonth()+1,u=u<<5|c.getDate(),f.write_shift(2,u)}function h(f){var c=f.read_shift(2)&65535,l=f.read_shift(2)&65535,u=new Date,p=l&31;l>>>=5;var w=l&15;l>>>=4,u.setMilliseconds(0),u.setFullYear(l+1980),u.setMonth(w-1),u.setDate(p);var k=c&31;c>>>=5;var R=c&63;return c>>>=6,u.setHours(c),u.setMinutes(R),u.setSeconds(k<<1),u}function o(f){Mt(f,0);for(var c={},l=0;f.l<=f.length-4;){var u=f.read_shift(2),p=f.read_shift(2),w=f.l+p,k={};u===21589&&(l=f.read_shift(1),l&1&&(k.mtime=f.read_shift(4)),p>5&&(l&2&&(k.atime=f.read_shift(4)),l&4&&(k.ctime=f.read_shift(4))),k.mtime&&(k.mt=new Date(k.mtime*1e3))),f.l=w,c[u]=k}return c}var E;function _(){return E||(E=(Di(),vs(Wn)))}function m(f,c){if(f[0]==80&&f[1]==75)return ni(f,c);if((f[0]|32)==109&&(f[1]|32)==105)return fi(f,c);if(f.length<512)throw new Error("CFB file size "+f.length+" < 512");var l=3,u=512,p=0,w=0,k=0,R=0,F=0,S=[],P=f.slice(0,512);Mt(P,0);var Z=H(P);switch(l=Z[0],l){case 3:u=512;break;case 4:u=4096;break;case 0:if(Z[1]==0)return ni(f,c);default:throw new Error("Major Version: Expected 3 or 4 saw "+l)}u!==512&&(P=f.slice(0,u),Mt(P,28));var j=f.slice(0,u);B(P,l);var te=P.read_shift(4,"i");if(l===3&&te!==0)throw new Error("# Directory Sectors: Expected 0 saw "+te);P.l+=4,k=P.read_shift(4,"i"),P.l+=4,P.chk("00100000","Mini Stream Cutoff Size: "),R=P.read_shift(4,"i"),p=P.read_shift(4,"i"),F=P.read_shift(4,"i"),w=P.read_shift(4,"i");for(var $=-1,K=0;K<109&&($=P.read_shift(4,"i"),!($<0));++K)S[K]=$;var pe=z(f,u);oe(F,w,pe,u,S);var Ce=ge(pe,k,S,u);Ce[k].name="!Directory",p>0&&R!==me&&(Ce[R].name="!MiniFAT"),Ce[S[0]].name="!FAT",Ce.fat_addrs=S,Ce.ssz=u;var ze={},He=[],$e=[],Dt=[];he(k,Ce,pe,He,p,ze,$e,R),ee($e,Dt,He),He.shift();var $t={FileIndex:$e,FullPaths:Dt};return c&&c.raw&&($t.raw={header:j,sectors:pe}),$t}function H(f){if(f[f.l]==80&&f[f.l+1]==75)return[0,0];f.chk(Je,"Header Signature: "),f.l+=16;var c=f.read_shift(2,"u");return[f.read_shift(2,"u"),c]}function B(f,c){var l=9;switch(f.l+=2,l=f.read_shift(2)){case 9:if(c!=3)throw new Error("Sector Shift: Expected 9 saw "+l);break;case 12:if(c!=4)throw new Error("Sector Shift: Expected 12 saw "+l);break;default:throw new Error("Sector Shift: Expected 9 or 12 saw "+l)}f.chk("0600","Mini Sector Shift: "),f.chk("000000000000","Reserved: ")}function z(f,c){for(var l=Math.ceil(f.length/c)-1,u=[],p=1;p<l;++p)u[p-1]=f.slice(p*c,(p+1)*c);return u[l-1]=f.slice(l*c),u}function ee(f,c,l){for(var u=0,p=0,w=0,k=0,R=0,F=l.length,S=[],P=[];u<F;++u)S[u]=P[u]=u,c[u]=l[u];for(;R<P.length;++R)u=P[R],p=f[u].L,w=f[u].R,k=f[u].C,S[u]===u&&(p!==-1&&S[p]!==p&&(S[u]=S[p]),w!==-1&&S[w]!==w&&(S[u]=S[w])),k!==-1&&(S[k]=u),p!==-1&&u!=S[u]&&(S[p]=S[u],P.lastIndexOf(p)<R&&P.push(p)),w!==-1&&u!=S[u]&&(S[w]=S[u],P.lastIndexOf(w)<R&&P.push(w));for(u=1;u<F;++u)S[u]===u&&(w!==-1&&S[w]!==w?S[u]=S[w]:p!==-1&&S[p]!==p&&(S[u]=S[p]));for(u=1;u<F;++u)if(f[u].type!==0){if(R=u,R!=S[R])do R=S[R],c[u]=c[R]+"/"+c[u];while(R!==0&&S[R]!==-1&&R!=S[R]);S[u]=-1}for(c[0]+="/",u=1;u<F;++u)f[u].type!==2&&(c[u]+="/")}function q(f,c,l){for(var u=f.start,p=f.size,w=[],k=u;l&&p>0&&k>=0;)w.push(c.slice(k*de,k*de+de)),p-=de,k=yr(l,k*4);return w.length===0?Et(0):xr(w).slice(0,f.size)}function oe(f,c,l,u,p){var w=me;if(f===me){if(c!==0)throw new Error("DIFAT chain shorter than expected")}else if(f!==-1){var k=l[f],R=(u>>>2)-1;if(!k)return;for(var F=0;F<R&&(w=yr(k,F*4))!==me;++F)p.push(w);c>=1&&oe(yr(k,u-4),c-1,l,u,p)}}function J(f,c,l,u,p){var w=[],k=[];p||(p=[]);var R=u-1,F=0,S=0;for(F=c;F>=0;){p[F]=!0,w[w.length]=F,k.push(f[F]);var P=l[Math.floor(F*4/u)];if(S=F*4&R,u<4+S)throw new Error("FAT boundary crossed: "+F+" 4 "+u);if(!f[P])break;F=yr(f[P],S)}return{nodes:w,data:bi([k])}}function ge(f,c,l,u){var p=f.length,w=[],k=[],R=[],F=[],S=u-1,P=0,Z=0,j=0,te=0;for(P=0;P<p;++P)if(R=[],j=P+c,j>=p&&(j-=p),!k[j]){F=[];var $=[];for(Z=j;Z>=0;){$[Z]=!0,k[Z]=!0,R[R.length]=Z,F.push(f[Z]);var K=l[Math.floor(Z*4/u)];if(te=Z*4&S,u<4+te)throw new Error("FAT boundary crossed: "+Z+" 4 "+u);if(!f[K]||(Z=yr(f[K],te),$[Z]))break}w[j]={nodes:R,data:bi([F])}}return w}function he(f,c,l,u,p,w,k,R){for(var F=0,S=u.length?2:0,P=c[f].data,Z=0,j=0,te;Z<P.length;Z+=128){var $=P.slice(Z,Z+128);Mt($,64),j=$.read_shift(2),te=zn($,0,j-S),u.push(te);var K={name:te,type:$.read_shift(1),color:$.read_shift(1),L:$.read_shift(4,"i"),R:$.read_shift(4,"i"),C:$.read_shift(4,"i"),clsid:$.read_shift(16),state:$.read_shift(4,"i"),start:0,size:0},pe=$.read_shift(2)+$.read_shift(2)+$.read_shift(2)+$.read_shift(2);pe!==0&&(K.ct=ue($,$.l-8));var Ce=$.read_shift(2)+$.read_shift(2)+$.read_shift(2)+$.read_shift(2);Ce!==0&&(K.mt=ue($,$.l-8)),K.start=$.read_shift(4,"i"),K.size=$.read_shift(4,"i"),K.size<0&&K.start<0&&(K.size=K.type=0,K.start=me,K.name=""),K.type===5?(F=K.start,p>0&&F!==me&&(c[F].name="!StreamData")):K.size>=4096?(K.storage="fat",c[K.start]===void 0&&(c[K.start]=J(l,K.start,c.fat_addrs,c.ssz)),c[K.start].name=K.name,K.content=c[K.start].data.slice(0,K.size)):(K.storage="minifat",K.size<0?K.size=0:F!==me&&K.start!==me&&c[F]&&(K.content=q(K,c[F].data,(c[R]||{}).data))),K.content&&Mt(K.content,0),w[te]=K,k.push(K)}}function ue(f,c){return new Date((Vf(f,c+4)/1e7*Math.pow(2,32)+Vf(f,c)/1e7-11644473600)*1e3)}function V(f,c){return _(),m(E.readFileSync(f),c)}function ve(f,c){var l=c&&c.type;switch(l||ot&&Buffer.isBuffer(f)&&(l="buffer"),l||"base64"){case"file":return V(f,c);case"base64":return m(gr(Yf(f)),c);case"binary":return m(gr(f),c)}return m(f,c)}function O(f,c){var l=c||{},u=l.root||"Root Entry";if(f.FullPaths||(f.FullPaths=[]),f.FileIndex||(f.FileIndex=[]),f.FullPaths.length!==f.FileIndex.length)throw new Error("inconsistent CFB structure");f.FullPaths.length===0&&(f.FullPaths[0]=u+"/",f.FileIndex[0]={name:u,type:5}),l.CLSID&&(f.FileIndex[0].clsid=l.CLSID),ie(f)}function ie(f){var c="Sh33tJ5";if(!mr.find(f,"/"+c)){var l=Et(4);l[0]=55,l[1]=l[3]=50,l[2]=54,f.FileIndex.push({name:c,type:2,content:l,size:4,L:69,R:69,C:69}),f.FullPaths.push(f.FullPaths[0]+c),G(f)}}function G(f,c){O(f);for(var l=!1,u=!1,p=f.FullPaths.length-1;p>=0;--p){var w=f.FileIndex[p];switch(w.type){case 0:u?l=!0:(f.FileIndex.pop(),f.FullPaths.pop());break;case 1:case 2:case 5:u=!0,isNaN(w.R*w.L*w.C)&&(l=!0),w.R>-1&&w.L>-1&&w.R==w.L&&(l=!0);break;default:l=!0;break}}if(!(!l&&!c)){var k=new Date(1987,1,19),R=0,F=Object.create?Object.create(null):{},S=[];for(p=0;p<f.FullPaths.length;++p)F[f.FullPaths[p]]=!0,f.FileIndex[p].type!==0&&S.push([f.FullPaths[p],f.FileIndex[p]]);for(p=0;p<S.length;++p){var P=r(S[p][0]);for(u=F[P];!u;){for(;r(P)&&!F[r(P)];)P=r(P);S.push([P,{name:n(P).replace("/",""),type:1,clsid:b,ct:k,mt:k,content:null}]),F[P]=!0,P=r(S[p][0]),u=F[P]}}for(S.sort(function(te,$){return t(te[0],$[0])}),f.FullPaths=[],f.FileIndex=[],p=0;p<S.length;++p)f.FullPaths[p]=S[p][0],f.FileIndex[p]=S[p][1];for(p=0;p<S.length;++p){var Z=f.FileIndex[p],j=f.FullPaths[p];if(Z.name=n(j).replace("/",""),Z.L=Z.R=Z.C=-(Z.color=1),Z.size=Z.content?Z.content.length:0,Z.start=0,Z.clsid=Z.clsid||b,p===0)Z.C=S.length>1?1:-1,Z.size=0,Z.type=5;else if(j.slice(-1)=="/"){for(R=p+1;R<S.length&&r(f.FullPaths[R])!=j;++R);for(Z.C=R>=S.length?-1:R,R=p+1;R<S.length&&r(f.FullPaths[R])!=r(j);++R);Z.R=R>=S.length?-1:R,Z.type=1}else r(f.FullPaths[p+1]||"")==r(j)&&(Z.R=p+1),Z.type=2}}}function fe(f,c){var l=c||{};if(l.fileType=="mad")return sr(f,l);if(G(f),l.fileType==="zip")return jt(f,l);var u=(function(te){for(var $=0,K=0,pe=0;pe<te.FileIndex.length;++pe){var Ce=te.FileIndex[pe];if(Ce.content){var ze=Ce.content.length;ze>0&&(ze<4096?$+=ze+63>>6:K+=ze+511>>9)}}for(var He=te.FullPaths.length+3>>2,$e=$+7>>3,Dt=$+127>>7,$t=$e+K+He+Dt,ut=$t+127>>7,Ir=ut<=109?0:Math.ceil((ut-109)/127);$t+ut+Ir+127>>7>ut;)Ir=++ut<=109?0:Math.ceil((ut-109)/127);var ct=[1,Ir,ut,Dt,He,K,$,0];return te.FileIndex[0].size=$<<6,ct[7]=(te.FileIndex[0].start=ct[0]+ct[1]+ct[2]+ct[3]+ct[4]+ct[5])+(ct[6]+7>>3),ct})(f),p=Et(u[7]<<9),w=0,k=0;{for(w=0;w<8;++w)p.write_shift(1,Ye[w]);for(w=0;w<8;++w)p.write_shift(2,0);for(p.write_shift(2,62),p.write_shift(2,3),p.write_shift(2,65534),p.write_shift(2,9),p.write_shift(2,6),w=0;w<3;++w)p.write_shift(2,0);for(p.write_shift(4,0),p.write_shift(4,u[2]),p.write_shift(4,u[0]+u[1]+u[2]+u[3]-1),p.write_shift(4,0),p.write_shift(4,4096),p.write_shift(4,u[3]?u[0]+u[1]+u[2]-1:me),p.write_shift(4,u[3]),p.write_shift(-4,u[1]?u[0]-1:me),p.write_shift(4,u[1]),w=0;w<109;++w)p.write_shift(-4,w<u[2]?u[1]+w:-1)}if(u[1])for(k=0;k<u[1];++k){for(;w<236+k*127;++w)p.write_shift(-4,w<u[2]?u[1]+w:-1);p.write_shift(-4,k===u[1]-1?me:k+1)}var R=function(te){for(k+=te;w<k-1;++w)p.write_shift(-4,w+1);te&&(++w,p.write_shift(-4,me))};for(k=w=0,k+=u[1];w<k;++w)p.write_shift(-4,U.DIFSECT);for(k+=u[2];w<k;++w)p.write_shift(-4,U.FATSECT);R(u[3]),R(u[4]);for(var F=0,S=0,P=f.FileIndex[0];F<f.FileIndex.length;++F)P=f.FileIndex[F],P.content&&(S=P.content.length,!(S<4096)&&(P.start=k,R(S+511>>9)));for(R(u[6]+7>>3);p.l&511;)p.write_shift(-4,U.ENDOFCHAIN);for(k=w=0,F=0;F<f.FileIndex.length;++F)P=f.FileIndex[F],P.content&&(S=P.content.length,!(!S||S>=4096)&&(P.start=k,R(S+63>>6)));for(;p.l&511;)p.write_shift(-4,U.ENDOFCHAIN);for(w=0;w<u[4]<<2;++w){var Z=f.FullPaths[w];if(!Z||Z.length===0){for(F=0;F<17;++F)p.write_shift(4,0);for(F=0;F<3;++F)p.write_shift(4,-1);for(F=0;F<12;++F)p.write_shift(4,0);continue}P=f.FileIndex[w],w===0&&(P.start=P.size?P.start-1:me);var j=w===0&&l.root||P.name;if(j.length>32&&(console.error("Name "+j+" will be truncated to "+j.slice(0,32)),j=j.slice(0,32)),S=2*(j.length+1),p.write_shift(64,j,"utf16le"),p.write_shift(2,S),p.write_shift(1,P.type),p.write_shift(1,P.color),p.write_shift(-4,P.L),p.write_shift(-4,P.R),p.write_shift(-4,P.C),P.clsid)p.write_shift(16,P.clsid,"hex");else for(F=0;F<4;++F)p.write_shift(4,0);p.write_shift(4,P.state||0),p.write_shift(4,0),p.write_shift(4,0),p.write_shift(4,0),p.write_shift(4,0),p.write_shift(4,P.start),p.write_shift(4,P.size),p.write_shift(4,0)}for(w=1;w<f.FileIndex.length;++w)if(P=f.FileIndex[w],P.size>=4096)if(p.l=P.start+1<<9,ot&&Buffer.isBuffer(P.content))P.content.copy(p,p.l,0,P.size),p.l+=P.size+511&-512;else{for(F=0;F<P.size;++F)p.write_shift(1,P.content[F]);for(;F&511;++F)p.write_shift(1,0)}for(w=1;w<f.FileIndex.length;++w)if(P=f.FileIndex[w],P.size>0&&P.size<4096)if(ot&&Buffer.isBuffer(P.content))P.content.copy(p,p.l,0,P.size),p.l+=P.size+63&-64;else{for(F=0;F<P.size;++F)p.write_shift(1,P.content[F]);for(;F&63;++F)p.write_shift(1,0)}if(ot)p.l=p.length;else for(;p.l<p.length;)p.write_shift(1,0);return p}function D(f,c){var l=f.FullPaths.map(function(F){return F.toUpperCase()}),u=l.map(function(F){var S=F.split("/");return S[S.length-(F.slice(-1)=="/"?2:1)]}),p=!1;c.charCodeAt(0)===47?(p=!0,c=l[0].slice(0,-1)+c):p=c.indexOf("/")!==-1;var w=c.toUpperCase(),k=p===!0?l.indexOf(w):u.indexOf(w);if(k!==-1)return f.FileIndex[k];var R=!w.match(Hi);for(w=w.replace(Jr,""),R&&(w=w.replace(Hi,"!")),k=0;k<l.length;++k)if((R?l[k].replace(Hi,"!"):l[k]).replace(Jr,"")==w||(R?u[k].replace(Hi,"!"):u[k]).replace(Jr,"")==w)return f.FileIndex[k];return null}var de=64,me=-2,Je="d0cf11e0a1b11ae1",Ye=[208,207,17,224,161,177,26,225],b="00000000000000000000000000000000",U={MAXREGSECT:-6,DIFSECT:-4,FATSECT:-3,ENDOFCHAIN:me,FREESECT:-1,HEADER_SIGNATURE:Je,HEADER_MINOR_VERSION:"3e00",MAXREGSID:-6,NOSTREAM:-1,HEADER_CLSID:b,EntryTypes:["unknown","storage","stream","lockbytes","property","root"]};function W(f,c,l){_();var u=fe(f,l);E.writeFileSync(c,u)}function le(f){for(var c=new Array(f.length),l=0;l<f.length;++l)c[l]=String.fromCharCode(f[l]);return c.join("")}function xe(f,c){var l=fe(f,c);switch(c&&c.type||"buffer"){case"file":return _(),E.writeFileSync(c.filename,l),l;case"binary":return typeof l=="string"?l:le(l);case"base64":return $f(typeof l=="string"?l:le(l));case"buffer":if(ot)return Buffer.isBuffer(l)?l:Nn(l);case"array":return typeof l=="string"?gr(l):l}return l}var Oe;function Ue(f){try{var c=f.InflateRaw,l=new c;if(l._processChunk(new Uint8Array([3,0]),l._finishFlushFlag),l.bytesRead)Oe=f;else throw new Error("zlib does not expose bytesRead")}catch(u){console.error("cannot use native zlib: "+(u.message||u))}}function Y(f,c){if(!Oe)return ii(f,c);var l=Oe.InflateRaw,u=new l,p=u._processChunk(f.slice(f.l),u._finishFlushFlag);return f.l+=u.bytesRead,p}function Pe(f){return Oe?Oe.deflateRawSync(f):Qr(f)}var L=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15],ye=[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258],_e=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];function Te(f){var c=(f<<1|f<<11)&139536|(f<<5|f<<15)&558144;return(c>>16|c>>8|c)&255}for(var Re=typeof Uint8Array<"u",qe=Re?new Uint8Array(256):[],At=0;At<256;++At)qe[At]=Te(At);function Wt(f,c){var l=qe[f&255];return c<=8?l>>>8-c:(l=l<<8|qe[f>>8&255],c<=16?l>>>16-c:(l=l<<8|qe[f>>16&255],l>>>24-c))}function nr(f,c){var l=c&7,u=c>>>3;return(f[u]|(l<=6?0:f[u+1]<<8))>>>l&3}function Er(f,c){var l=c&7,u=c>>>3;return(f[u]|(l<=5?0:f[u+1]<<8))>>>l&7}function Li(f,c){var l=c&7,u=c>>>3;return(f[u]|(l<=4?0:f[u+1]<<8))>>>l&15}function Ar(f,c){var l=c&7,u=c>>>3;return(f[u]|(l<=3?0:f[u+1]<<8))>>>l&31}function qr(f,c){var l=c&7,u=c>>>3;return(f[u]|(l<=1?0:f[u+1]<<8))>>>l&127}function ar(f,c,l){var u=c&7,p=c>>>3,w=(1<<l)-1,k=f[p]>>>u;return l<8-u||(k|=f[p+1]<<8-u,l<16-u)||(k|=f[p+2]<<16-u,l<24-u)||(k|=f[p+3]<<24-u),k&w}function _t(f,c,l){var u=c&7,p=c>>>3;return u<=5?f[p]|=(l&7)<<u:(f[p]|=l<<u&255,f[p+1]=(l&7)>>8-u),c+3}function Ui(f,c,l){var u=c&7,p=c>>>3;return l=(l&1)<<u,f[p]|=l,c+1}function pt(f,c,l){var u=c&7,p=c>>>3;return l<<=u,f[p]|=l&255,l>>>=8,f[p+1]=l,c+8}function Fr(f,c,l){var u=c&7,p=c>>>3;return l<<=u,f[p]|=l&255,l>>>=8,f[p+1]=l&255,f[p+2]=l>>>8,c+16}function kr(f,c){var l=f.length,u=2*l>c?2*l:c+5,p=0;if(l>=c)return f;if(ot){var w=Kf(u);if(f.copy)f.copy(w);else for(;p<f.length;++p)w[p]=f[p];return w}else if(Re){var k=new Uint8Array(u);if(k.set)k.set(f);else for(;p<l;++p)k[p]=f[p];return k}return f.length=u,f}function je(f){for(var c=new Array(f),l=0;l<f;++l)c[l]=0;return c}function Ne(f,c,l){var u=1,p=0,w=0,k=0,R=0,F=f.length,S=Re?new Uint16Array(32):je(32);for(w=0;w<32;++w)S[w]=0;for(w=F;w<l;++w)f[w]=0;F=f.length;var P=Re?new Uint16Array(F):je(F);for(w=0;w<F;++w)S[p=f[w]]++,u<p&&(u=p),P[w]=0;for(S[0]=0,w=1;w<=u;++w)S[w+16]=R=R+S[w-1]<<1;for(w=0;w<F;++w)R=f[w],R!=0&&(P[w]=S[R+16]++);var Z=0;for(w=0;w<F;++w)if(Z=f[w],Z!=0)for(R=Wt(P[w],u)>>u-Z,k=(1<<u+4-Z)-1;k>=0;--k)c[R|k<<Z]=Z&15|w<<4;return u}var fr=Re?new Uint16Array(512):je(512),Sr=Re?new Uint16Array(32):je(32);if(!Re){for(var lt=0;lt<512;++lt)fr[lt]=0;for(lt=0;lt<32;++lt)Sr[lt]=0}(function(){for(var f=[],c=0;c<32;c++)f.push(5);Ne(f,Sr,32);var l=[];for(c=0;c<=143;c++)l.push(8);for(;c<=255;c++)l.push(9);for(;c<=279;c++)l.push(7);for(;c<=287;c++)l.push(8);Ne(l,fr,288)})();var Zt=(function(){for(var c=Re?new Uint8Array(32768):[],l=0,u=0;l<_e.length-1;++l)for(;u<_e[l+1];++u)c[u]=l;for(;u<32768;++u)c[u]=29;var p=Re?new Uint8Array(259):[];for(l=0,u=0;l<ye.length-1;++l)for(;u<ye[l+1];++u)p[u]=l;function w(R,F){for(var S=0;S<R.length;){var P=Math.min(65535,R.length-S),Z=S+P==R.length;for(F.write_shift(1,+Z),F.write_shift(2,P),F.write_shift(2,~P&65535);P-- >0;)F[F.l++]=R[S++]}return F.l}function k(R,F){for(var S=0,P=0,Z=Re?new Uint16Array(32768):[];P<R.length;){var j=Math.min(65535,R.length-P);if(j<10){for(S=_t(F,S,+(P+j==R.length)),S&7&&(S+=8-(S&7)),F.l=S/8|0,F.write_shift(2,j),F.write_shift(2,~j&65535);j-- >0;)F[F.l++]=R[P++];S=F.l*8;continue}S=_t(F,S,+(P+j==R.length)+2);for(var te=0;j-- >0;){var $=R[P];te=(te<<5^$)&32767;var K=-1,pe=0;if((K=Z[te])&&(K|=P&-32768,K>P&&(K-=32768),K<P))for(;R[K+pe]==R[P+pe]&&pe<250;)++pe;if(pe>2){$=p[pe],$<=22?S=pt(F,S,qe[$+1]>>1)-1:(pt(F,S,3),S+=5,pt(F,S,qe[$-23]>>5),S+=3);var Ce=$<8?0:$-4>>2;Ce>0&&(Fr(F,S,pe-ye[$]),S+=Ce),$=c[P-K],S=pt(F,S,qe[$]>>3),S-=3;var ze=$<4?0:$-2>>1;ze>0&&(Fr(F,S,P-K-_e[$]),S+=ze);for(var He=0;He<pe;++He)Z[te]=P&32767,te=(te<<5^R[P])&32767,++P;j-=pe-1}else $<=143?$=$+48:S=Ui(F,S,1),S=pt(F,S,qe[$]),Z[te]=P&32767,++P}S=pt(F,S,0)-1}return F.l=(S+7)/8|0,F.l}return function(F,S){return F.length<8?w(F,S):k(F,S)}})();function Qr(f){var c=Et(50+Math.floor(f.length*1.1)),l=Zt(f,c);return c.slice(0,l)}var Bt=Re?new Uint16Array(32768):je(32768),ei=Re?new Uint16Array(32768):je(32768),Ht=Re?new Uint16Array(128):je(128),ti=1,ri=1;function Ni(f,c){var l=Ar(f,c)+257;c+=5;var u=Ar(f,c)+1;c+=5;var p=Li(f,c)+4;c+=4;for(var w=0,k=Re?new Uint8Array(19):je(19),R=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],F=1,S=Re?new Uint8Array(8):je(8),P=Re?new Uint8Array(8):je(8),Z=k.length,j=0;j<p;++j)k[L[j]]=w=Er(f,c),F<w&&(F=w),S[w]++,c+=3;var te=0;for(S[0]=0,j=1;j<=F;++j)P[j]=te=te+S[j-1]<<1;for(j=0;j<Z;++j)(te=k[j])!=0&&(R[j]=P[te]++);var $=0;for(j=0;j<Z;++j)if($=k[j],$!=0){te=qe[R[j]]>>8-$;for(var K=(1<<7-$)-1;K>=0;--K)Ht[te|K<<$]=$&7|j<<3}var pe=[];for(F=1;pe.length<l+u;)switch(te=Ht[qr(f,c)],c+=te&7,te>>>=3){case 16:for(w=3+nr(f,c),c+=2,te=pe[pe.length-1];w-- >0;)pe.push(te);break;case 17:for(w=3+Er(f,c),c+=3;w-- >0;)pe.push(0);break;case 18:for(w=11+qr(f,c),c+=7;w-- >0;)pe.push(0);break;default:pe.push(te),F<te&&(F=te);break}var Ce=pe.slice(0,l),ze=pe.slice(l);for(j=l;j<286;++j)Ce[j]=0;for(j=u;j<30;++j)ze[j]=0;return ti=Ne(Ce,Bt,286),ri=Ne(ze,ei,30),c}function zi(f,c){if(f[0]==3&&!(f[1]&3))return[Jf(c),2];for(var l=0,u=0,p=Kf(c||1<<18),w=0,k=p.length>>>0,R=0,F=0;(u&1)==0;){if(u=Er(f,l),l+=3,u>>>1)u>>1==1?(R=9,F=5):(l=Ni(f,l),R=ti,F=ri);else{l&7&&(l+=8-(l&7));var S=f[l>>>3]|f[(l>>>3)+1]<<8;if(l+=32,S>0)for(!c&&k<w+S&&(p=kr(p,w+S),k=p.length);S-- >0;)p[w++]=f[l>>>3],l+=8;continue}for(;;){!c&&k<w+32767&&(p=kr(p,w+32767),k=p.length);var P=ar(f,l,R),Z=u>>>1==1?fr[P]:Bt[P];if(l+=Z&15,Z>>>=4,(Z>>>8&255)===0)p[w++]=Z;else{if(Z==256)break;Z-=257;var j=Z<8?0:Z-4>>2;j>5&&(j=0);var te=w+ye[Z];j>0&&(te+=ar(f,l,j),l+=j),P=ar(f,l,F),Z=u>>>1==1?Sr[P]:ei[P],l+=Z&15,Z>>>=4;var $=Z<4?0:Z-2>>1,K=_e[Z];for($>0&&(K+=ar(f,l,$),l+=$),!c&&k<te&&(p=kr(p,te+100),k=p.length);w<te;)p[w]=p[w-K],++w}}}return c?[p,l+7>>>3]:[p.slice(0,w),l+7>>>3]}function ii(f,c){var l=f.slice(f.l||0),u=zi(l,c);return f.l+=u[1],u[0]}function Pr(f,c){if(f)typeof console<"u"&&console.error(c);else throw new Error(c)}function ni(f,c){var l=f;Mt(l,0);var u=[],p=[],w={FileIndex:u,FullPaths:p};O(w,{root:c.root});for(var k=l.length-4;(l[k]!=80||l[k+1]!=75||l[k+2]!=5||l[k+3]!=6)&&k>=0;)--k;l.l=k+4,l.l+=4;var R=l.read_shift(2);l.l+=6;var F=l.read_shift(4);for(l.l=F,k=0;k<R;++k){l.l+=20;var S=l.read_shift(4),P=l.read_shift(4),Z=l.read_shift(2),j=l.read_shift(2),te=l.read_shift(2);l.l+=8;var $=l.read_shift(4),K=o(l.slice(l.l+Z,l.l+Z+j));l.l+=Z+j+te;var pe=l.l;l.l=$+4,De(l,S,P,w,K),l.l=pe}return w}function De(f,c,l,u,p){f.l+=2;var w=f.read_shift(2),k=f.read_shift(2),R=h(f);if(w&8257)throw new Error("Unsupported ZIP encryption");for(var F=f.read_shift(4),S=f.read_shift(4),P=f.read_shift(4),Z=f.read_shift(2),j=f.read_shift(2),te="",$=0;$<Z;++$)te+=String.fromCharCode(f[f.l++]);if(j){var K=o(f.slice(f.l,f.l+j));(K[21589]||{}).mt&&(R=K[21589].mt),((p||{})[21589]||{}).mt&&(R=p[21589].mt)}f.l+=j;var pe=f.slice(f.l,f.l+S);switch(k){case 8:pe=Y(f,P);break;case 0:break;default:throw new Error("Unsupported ZIP Compression method "+k)}var Ce=!1;w&8&&(F=f.read_shift(4),F==134695760&&(F=f.read_shift(4),Ce=!0),S=f.read_shift(4),P=f.read_shift(4)),S!=c&&Pr(Ce,"Bad compressed size: "+c+" != "+S),P!=l&&Pr(Ce,"Bad uncompressed size: "+l+" != "+P);var ze=Xf.buf(pe,0);F>>0!=ze>>0&&Pr(Ce,"Bad CRC32 checksum: "+F+" != "+ze),Ke(u,te,pe,{unsafe:!0,mt:R})}function jt(f,c){var l=c||{},u=[],p=[],w=Et(1),k=l.compression?8:0,R=0,F=!1;F&&(R|=8);var S=0,P=0,Z=0,j=0,te=f.FullPaths[0],$=te,K=f.FileIndex[0],pe=[],Ce=0;for(S=1;S<f.FullPaths.length;++S)if($=f.FullPaths[S].slice(te.length),K=f.FileIndex[S],!(!K.size||!K.content||$=="Sh33tJ5")){var ze=Z,He=Et($.length);for(P=0;P<$.length;++P)He.write_shift(1,$.charCodeAt(P)&127);He=He.slice(0,He.l),pe[j]=Xf.buf(K.content,0);var $e=K.content;k==8&&($e=Pe($e)),w=Et(30),w.write_shift(4,67324752),w.write_shift(2,20),w.write_shift(2,R),w.write_shift(2,k),K.mt?a(w,K.mt):w.write_shift(4,0),w.write_shift(-4,R&8?0:pe[j]),w.write_shift(4,R&8?0:$e.length),w.write_shift(4,R&8?0:K.content.length),w.write_shift(2,He.length),w.write_shift(2,0),Z+=w.length,u.push(w),Z+=He.length,u.push(He),Z+=$e.length,u.push($e),R&8&&(w=Et(12),w.write_shift(-4,pe[j]),w.write_shift(4,$e.length),w.write_shift(4,K.content.length),Z+=w.l,u.push(w)),w=Et(46),w.write_shift(4,33639248),w.write_shift(2,0),w.write_shift(2,20),w.write_shift(2,R),w.write_shift(2,k),w.write_shift(4,0),w.write_shift(-4,pe[j]),w.write_shift(4,$e.length),w.write_shift(4,K.content.length),w.write_shift(2,He.length),w.write_shift(2,0),w.write_shift(2,0),w.write_shift(2,0),w.write_shift(2,0),w.write_shift(4,0),w.write_shift(4,ze),Ce+=w.l,p.push(w),Ce+=He.length,p.push(He),++j}return w=Et(22),w.write_shift(4,101010256),w.write_shift(2,0),w.write_shift(2,0),w.write_shift(2,j),w.write_shift(2,j),w.write_shift(4,Ce),w.write_shift(4,Z),w.write_shift(2,0),xr([xr(u),xr(p),w])}var Ft={htm:"text/html",xml:"text/xml",gif:"image/gif",jpg:"image/jpeg",png:"image/png",mso:"application/x-mso",thmx:"application/vnd.ms-officetheme",sh33tj5:"application/octet-stream"};function Mi(f,c){if(f.ctype)return f.ctype;var l=f.name||"",u=l.match(/\.([^\.]+)$/);return u&&Ft[u[1]]||c&&(u=(l=c).match(/[\.\\]([^\.\\])+$/),u&&Ft[u[1]])?Ft[u[1]]:"application/octet-stream"}function Gi(f){for(var c=$f(f),l=[],u=0;u<c.length;u+=76)l.push(c.slice(u,u+76));return l.join(`\r
 `)+`\r
 `}function Tr(f){var c=f.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7E-\xFF=]/g,function(S){var P=S.charCodeAt(0).toString(16).toUpperCase();return"="+(P.length==1?"0"+P:P)});c=c.replace(/ $/mg,"=20").replace(/\t$/mg,"=09"),c.charAt(0)==`
@@ -841,7 +869,7 @@ cfb/cfb.js:
     if (!sections.length) sections = allKeys.filter(function (k) { return /(^|\/)section\d+\.xml$/i.test(k); });
     sections = sections
       .sort(function (a, b) {
-        return parseInt(a.match(/section(\d+)/)[1]) - parseInt(b.match(/section(\d+)/)[1]);
+        return parseInt(a.match(/section(\d+)/i)[1]) - parseInt(b.match(/section(\d+)/i)[1]);
       });
     if (!sections.length) throw new Error('본문(section*.xml) 없음');
 
@@ -850,7 +878,7 @@ cfb/cfb.js:
       var sdoc = parser.parseFromString(dec(files[path]), 'text/xml');
       if (sdoc.getElementsByTagName('parsererror').length) throw new Error('본문 XML 파싱 실패: ' + path);
 
-      if (!pageInfo) {
+      {
         var pg = descByLn(sdoc, 'pagePr')[0];
         if (pg) {
           pageInfo = { w: num(pg, 'width', 59528), h: num(pg, 'height', 84188), ml: 8504, mr: 8504, mt: 5668, mb: 4252 };
@@ -865,6 +893,7 @@ cfb/cfb.js:
 
       var secDiv = docRef.createElement('div');
       secDiv.className = 'hx-section';
+      secDiv._pageInfo = Object.assign({}, pageInfo || { w:59528,h:84188,ml:8504,mr:8504,mt:5668,mb:4252 });
       var root = sdoc.documentElement;
       var flowState = { prevEnd: null, base: 0 };
       var prevRawEnd = -1;
@@ -1738,15 +1767,16 @@ cfb/cfb.js:
   }
 
   /* ---------- 진입 ---------- */
-  function render(binary, container, docRef) {
+  function render(binary, container, docRef, prepared) {
     var CFB = window.HWPLIB.CFB, inflate = window.HWPLIB.inflateRaw;
-    var cont = CFB.read(binary, { type: 'binary' });
+    var cont = prepared ? prepared.cont : CFB.read(binary, { type: 'binary' });
     var fh = CFB.find(cont, 'FileHeader');
     if (!fh) throw new Error('FileHeader 없음');
     var flags = fh.content[36] | (fh.content[37] << 8) | (fh.content[38] << 16) | (fh.content[39] << 24);
     if (flags & 2) throw new Error('암호화(배포용) 문서');
     var compressed = !!(flags & 1);
     var get = function (name) {
+      if(prepared){var key=Object.keys(prepared.streams).find(function(p){return p===name||p.endsWith('/'+name);});if(key)return prepared.streams[key];}
       var e = CFB.find(cont, name);
       if (!e) return null;
       var u8 = e.content instanceof Uint8Array ? e.content : Uint8Array.from(e.content);
@@ -1795,15 +1825,17 @@ cfb/cfb.js:
 
     var pageInfo = null;
     var totalParas = 0;
-    for (var s = 0; s < 64; s++) {
-      var body = get('Root Entry/BodyText/Section' + s) || get('BodyText/Section' + s);
-      if (!body) break;   // 선언값(sectionSize) 오류 방어: 실재 스트림 기준
+    var sectionPaths = cont.FullPaths.filter(function (path) { return /(?:^|\/)BodyText\/Section\d+$/i.test(path); }).sort(function(a,b) { return +a.match(/Section(\d+)$/i)[1] - +b.match(/Section(\d+)$/i)[1]; });
+    for (var s = 0; s < sectionPaths.length; s++) {
+      var body = get(sectionPaths[s]);
+      if (!body) throw new Error('구역 읽기 실패: ' + sectionPaths[s]);   // 선언값(sectionSize) 오류 방어: 실재 스트림 기준
       var sec = parseSection(body, ctx);
       totalParas += sec.paras.length;
-      if (!pageInfo && sec.pageInfo) pageInfo = sec.pageInfo;
+      if (sec.pageInfo) pageInfo = sec.pageInfo;
       var secDiv = docRef.createElement('div');
       secDiv.className = 'hx-section';
       var pi2 = pageInfo || { w: 59528, h: 84188, ml: 8504, mr: 8504, mt: 5668, mb: 4252 };
+      secDiv._pageInfo = Object.assign({}, pi2);
       var curPage = -1, pageDiv = null;
       var flowState = { prevEnd: null, base: 0 };
       var openPage = function () {
@@ -1928,7 +1960,7 @@ cfb/cfb.js:
     var card = hxPage.querySelector('.hx-pagecard') || hxPage;
     var ph = parseFloat(card.style.minHeight) || card.offsetHeight || 1;
     var avail = hxScroll.clientHeight - 48;
-    setZoom(avail / ph);
+    setZoom(Math.min(avail / ph, (hxScroll.clientWidth - 32) / pagePxWidth));
   }
   function applyZoomMode() {
     if (zoomMode === 'fitw') { fitMode = true; fitWidth(); }
@@ -1938,6 +1970,43 @@ cfb/cfb.js:
   }
   var userFonts = [];
   var busy = false;
+  var loadGeneration = 0, activeWorker = null, workerURL = null, loadTimer = null;
+  function stopWorker() { if(activeWorker) activeWorker.terminate();activeWorker=null;if(workerURL) URL.revokeObjectURL(workerURL);workerURL=null;clearTimeout(loadTimer); }
+  function unpackInWorker(u8, kind, done) {
+    var token=loadGeneration;
+    function workerMain(){
+      self.onmessage=function(event){try{
+        var u8=event.data.bytes,kind=event.data.kind,limit=128*1024*1024,total=0,result;
+        if(kind==='zip'){
+          var count=0;
+          result=window.HWPLIB.unzipSync(u8,{filter:function(entry){
+            if(++count>10000)throw new Error('압축 항목이 10,000개를 초과합니다.');
+            if(!Number.isSafeInteger(entry.originalSize)||entry.originalSize<0||entry.originalSize>32*1024*1024)throw new Error('압축 항목이 처리 한도(32MB)를 초과합니다.');
+            total+=entry.originalSize;if(total>limit)throw new Error('압축 해제 크기가 128MB를 초과합니다.');return true;
+          }});
+        }else{
+          var cont=window.HWPLIB.CFB.read(u8,{type:'array'}),fh=window.HWPLIB.CFB.find(cont,'FileHeader');
+          if(!fh||fh.content.length<40)throw new Error('HWP 파일 헤더가 올바르지 않습니다.');
+          var flags=fh.content[36];if(flags&2)throw new Error('암호화 문서는 지원하지 않습니다.');
+          var streams={};cont.FullPaths.forEach(function(path){if(!/(?:^|\/)(?:DocInfo|BodyText\/Section\d+)$/i.test(path))return;
+            var e=window.HWPLIB.CFB.find(cont,path),data=new Uint8Array(e.content);
+            if(flags&1)data=window.HWPLIB.inflateRaw(data);
+            total+=data.byteLength;if(data.byteLength>32*1024*1024||total>limit)throw new Error('HWP 압축 해제 크기가 처리 한도를 초과합니다.');streams[path]=data;
+          });result={cont:cont,streams:streams};
+        }
+        self.postMessage({ok:true,result:result});
+      }catch(error){self.postMessage({ok:false,message:error.message});}};
+    }
+    try {
+      workerURL=URL.createObjectURL(new Blob(['var window=self;\n',document.getElementById('hxBundle').textContent,'\n(',workerMain.toString(),')();'],{type:'text/javascript'}));
+      activeWorker=new Worker(workerURL);
+      activeWorker.onmessage=function(event){if(token!==loadGeneration)return;stopWorker();if(!event.data.ok)return fail('문서 준비 실패',event.data.message);done(event.data.result);};
+      activeWorker.onerror=function(){if(token!==loadGeneration)return;stopWorker();fail('문서 준비 실패','브라우저에서 작업 실행을 허용하지 않거나 파일을 처리할 수 없습니다.');};
+      loadTimer=setTimeout(function(){if(token!==loadGeneration)return;stopWorker();fail('처리 시간이 초과되었습니다.','문서를 나누거나 작은 파일로 다시 시도하세요.');},30000);
+      activeWorker.postMessage({bytes:u8,kind:kind});
+    }catch(error){stopWorker();fail('문서 준비 기능을 시작할 수 없습니다.',error.message);}
+  }
+
   window.addEventListener('error', function (ev) {
     if (!busy) return;
     busy = false;
@@ -2012,23 +2081,25 @@ cfb/cfb.js:
   }
 
   function setZoom(z) {
-    zoom = Math.min(3, Math.max(0.4, z));
+    zoom = Math.min(3, Math.max(0.1, z));
     hxZoom.style.zoom = zoom;
     try { syncZoomSel(); } catch (eS) {}
   }
 
   function reset() {
+    loadGeneration++;stopWorker();busy=false;setLoading(false);
+    if (window.hxReaderTools) window.hxReaderTools.clear();
     if (binInstance) { try { binInstance.distory(); } catch (e) {} binInstance = null; }
     blobUrls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
     blobUrls = [];
     binViewer.innerHTML = ''; hxPage.innerHTML = '';
     [hxScroll, binWrap, errbox].forEach(function (el) { el.style.display = 'none'; });
     [btnPdf, btnReset, binHint, btnCompat].forEach(function (el) { el.style.display = 'none'; });
-    currentBinary = null;
+    currentBinary = null; currentPrepared = null;
     zoombox.style.display = 'none'; badge.style.display = 'none';
     drop.style.display = 'flex'; fname.textContent = '';
     try { document.title = BASE_TITLE; } catch (eT2) {}
-    setZoom(1);
+    hxZoom.style.zoom = 1;
   }
 
   function fail(msg, guide) {
@@ -2037,7 +2108,8 @@ cfb/cfb.js:
     reset();
     drop.style.display = 'none';
     errmsg.textContent = msg;
-    errguide.innerHTML = guide || '';
+    errguide.textContent = (guide || '').replace(/<br\s*\/?>/gi, '\n');
+    errguide.style.whiteSpace = 'pre-line';
     errbox.style.display = 'block';
     btnReset.style.display = 'inline-block';
   }
@@ -2505,15 +2577,14 @@ cfb/cfb.js:
 
   var BASE_TITLE = document.title;
 
-  function showPaged(info, badgeText) {
-    blobUrls = info.urls || [];
+  function layoutSection(root, info) {
     var pi = info.pageInfo;
-    pagePxWidth = pi.w * info.U2PX;
-    hxPage.style.width = pagePxWidth + 'px';
-    hxPage.style.minHeight = '0';
-    hxPage.style.padding = '0';
+    var pagePxWidth = pi.w * info.U2PX;
+    root.style.width = pagePxWidth + 'px';
+    root.style.minHeight = '0';
+    root.style.padding = '0';
     var contentHmm = ((pi.h - pi.mt - pi.mb) * info.U2MM).toFixed(2);
-    var cards = hxPage.querySelectorAll('.hx-pagecard');
+    var cards = root.querySelectorAll('.hx-pagecard');
     var padCss = (pi.mt * info.U2PX) + 'px ' + (pi.mr * info.U2PX) + 'px ' + (pi.mb * info.U2PX) + 'px ' + (pi.ml * info.U2PX) + 'px';
     for (var ci = 0; ci < cards.length; ci++) {
       cards[ci].style.width = pagePxWidth + 'px';
@@ -2524,32 +2595,22 @@ cfb/cfb.js:
     var contentHpx = (pi.h - pi.mt - pi.mb) * info.U2PX;
     var safety = pi.mb * info.U2PX;            // 하단 여백 = 클립 안전마진
     setTimeout(function () {
+      cards = root.querySelectorAll('.hx-pagecard');
       for (var cj = 0; cj < cards.length; cj++) {
         var overPx = cards[cj].scrollHeight - (pi.h * info.U2PX);
         if (overPx > safety - 6) cards[cj].classList.add('hx-tall'); // 여백 초과: 클립 대신 자연 확장
       }
     }, 80);
     if (!cards.length) { // 카드 미생성 경로(구형) 폴백
-      hxPage.style.minHeight = (pi.h * info.U2PX) + 'px';
-      hxPage.style.padding = padCss;
+      root.style.minHeight = (pi.h * info.U2PX) + 'px';
+      root.style.padding = padCss;
     }
     var wmm = (pi.w * info.U2MM).toFixed(1), hmm = (pi.h * info.U2MM).toFixed(1);
-    $('pageStyle').textContent =
-      // 여백은 '카드 패딩' 한 곳에서만 준다. @page에도 주면 이중 적용되어 쪽마다 아래가 잘린다.
-      // 따라서 @page는 여백 0 + 용지 전체 크기, 카드는 용지 전체 높이(패딩 포함, border-box)로 맞춘다.
-      '@media print { @page { size: ' + wmm + 'mm ' + hmm + 'mm; margin: 0; } ' +
-      '.hx-page { padding: 0 !important; min-height: 0 !important; width: auto !important; box-shadow: none !important; margin: 0 !important; } ' +
-      '.hx-pagecard { min-height: 0 !important; box-shadow: none !important; margin: 0 !important; ' +
-        'width: ' + wmm + 'mm !important; ' +
-        'padding: ' + (pi.mt * info.U2MM).toFixed(2) + 'mm ' + (pi.mr * info.U2MM).toFixed(2) + 'mm ' +
-                      (pi.mb * info.U2MM).toFixed(2) + 'mm ' + (pi.ml * info.U2MM).toFixed(2) + 'mm !important; } ' +
-      '.hx-pagecard { break-after: page; page-break-after: always; height: ' + hmm + 'mm !important; overflow: hidden !important; } ' +
-      '.hx-pagecard.hx-tall { height: auto !important; overflow: visible !important; } ' +
-      '.hx-pagecard:last-child { break-after: auto; page-break-after: auto; } }';
     drop.style.display = 'none';
     hxScroll.style.display = 'block';
-    paginate(hxPage, (pi.h - pi.mt - pi.mb) * info.U2PX);
-    var cards2 = hxPage.querySelectorAll('.hx-pagecard');
+    paginate(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
+    root.style.padding='0';root.style.minHeight='0';
+    var cards2 = root.querySelectorAll('.hx-pagecard');
     for (var c2i = 0; c2i < cards2.length; c2i++) {
       cards2[c2i].style.width = pagePxWidth + 'px';
       cards2[c2i].style.minHeight = (pi.h * info.U2PX) + 'px';
@@ -2558,29 +2619,29 @@ cfb/cfb.js:
     }
     // 각주·미주 블록이 쪽 카드 밖에 남으면 인쇄에서 별도 쪽이 생김 → 해당 쪽 안으로 이동
     var noteBlocks = [];
-    var allNotes = hxPage.querySelectorAll('.hx-notes');
+    var allNotes = root.querySelectorAll('.hx-notes');
     for (var nb0 = 0; nb0 < allNotes.length; nb0++)
       if (!allNotes[nb0].closest('.hx-pagecard')) noteBlocks.push(allNotes[nb0]);
     for (var nb1 = 0; nb1 < noteBlocks.length; nb1++) {
       var nBlk = noteBlocks[nb1], host = nBlk.previousElementSibling;
       while (host && !(host.classList && host.classList.contains('hx-pagecard'))) host = host.previousElementSibling;
       if (!host) {
-        var allC = hxPage.querySelectorAll('.hx-pagecard');
+        var allC = root.querySelectorAll('.hx-pagecard');
         host = allC[allC.length - 1];
       }
       if (host) host.appendChild(nBlk);
     }
     // 내용이 전혀 없는 쪽 제거 (섹션 경계·앵커 처리에서 생기는 유령 쪽) — 문서 전체가 비면 1쪽은 유지
-    var allCards = hxPage.querySelectorAll('.hx-pagecard');
+    var allCards = root.querySelectorAll('.hx-pagecard');
     if (allCards.length > 1) {
       for (var ec = allCards.length - 1; ec >= 0; ec--) {
         var cd = allCards[ec];
         if (!cd.textContent.trim() && !cd.querySelector('table,img,svg') &&
-            hxPage.querySelectorAll('.hx-pagecard').length > 1) cd.remove();
+            root.querySelectorAll('.hx-pagecard').length > 1) cd.remove();
       }
     }
     // 셀 안 줄 들여쓰기 보정: 들여쓰기가 셀 안쪽 폭을 넘으면 글자가 시작도 못 하고 밖으로 밀린다
-    var tdsInd = hxPage.querySelectorAll('td');
+    var tdsInd = root.querySelectorAll('td');
     var indFix = [];
     for (var ti = 0; ti < tdsInd.length; ti++) {
       var tdI = tdsInd[ti], csI = getComputedStyle(tdI);
@@ -2595,7 +2656,7 @@ cfb/cfb.js:
     for (var ifx = 0; ifx < indFix.length; ifx++)
       indFix[ifx][0].style.paddingLeft = indFix[ifx][1].toFixed(2) + 'px';
     // 셀 여백 실측 보정: 좌우 여백 합이 실제 셀 폭에 육박하면 글자 자리가 없어 밖으로 밀린다
-    var tdsPad = hxPage.querySelectorAll('td');
+    var tdsPad = root.querySelectorAll('td');
     var padFix = [];
     for (var pi2 = 0; pi2 < tdsPad.length; pi2++) {
       var tdP = tdsPad[pi2], csP = getComputedStyle(tdP);
@@ -2614,7 +2675,7 @@ cfb/cfb.js:
     // 셀 지정높이 자가검증: 내용보다 '한 쪽 이상' 큰 높이는 성립 불가 → 해제 (빈 표·유령 여백 방지)
     // 최적화: 지정높이가 한 쪽보다 큰 셀만 후보 → 측정 대상을 수천 개에서 수 개로 줄임
     var contentHguard = (pi.h - pi.mt - pi.mb) * info.U2PX;
-    var tdsG = hxPage.querySelectorAll('td');
+    var tdsG = root.querySelectorAll('td');
     var candG = [];
     for (var gi = 0; gi < tdsG.length; gi++) {
       var declG = parseFloat(tdsG[gi].style.height) || 0;
@@ -2625,9 +2686,9 @@ cfb/cfb.js:
       for (var gk = 0; gk < tdG.children.length; gk++) inner += tdG.children[gk].offsetHeight;
       if (decl - inner > contentHguard) tdG.style.height = '';
     }
-    reflowFlowGaps(hxPage);
-    repairOverflow(hxPage, (pi.h - pi.mt - pi.mb) * info.U2PX);
-    var cards3 = hxPage.querySelectorAll('.hx-pagecard');
+    reflowFlowGaps(root);
+    repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
+    var cards3 = root.querySelectorAll('.hx-pagecard');
     for (var c3 = 0; c3 < cards3.length; c3++) {
       cards3[c3].style.width = pagePxWidth + 'px';
       cards3[c3].style.minHeight = (pi.h * info.U2PX) + 'px';
@@ -2636,7 +2697,7 @@ cfb/cfb.js:
     }
     // 보더 누적 잔차(수십 px): 초과 카드만 미세 zoom으로 A4 봉인 (내용 무손실)
     // 쪽을 지배하는 개체 줄(≥60%) 뒤에 남은 짧은 줄은 다음 쪽으로 넘김 — 한글의 자연 넘김 재현
-    var cardsN = Array.prototype.slice.call(hxPage.querySelectorAll('.hx-pagecard'));
+    var cardsN = Array.prototype.slice.call(root.querySelectorAll('.hx-pagecard'));
     var contentHn = (pi.h - pi.mt - pi.mb) * info.U2PX;
     for (var ni = 0; ni < cardsN.length; ni++) {
       var cN = cardsN[ni];
@@ -2684,7 +2745,7 @@ cfb/cfb.js:
       nextC.insertBefore(holder, nextC.firstChild);
     }
     var contentHpx2 = (pi.h - pi.mt - pi.mb) * info.U2PX;
-    var cardsF = hxPage.querySelectorAll('.hx-pagecard');
+    var cardsF = root.querySelectorAll('.hx-pagecard');
     var innersF = [];
     for (var cf = 0; cf < cardsF.length; cf++) {
       var cEl = cardsF[cf];
@@ -2717,7 +2778,7 @@ cfb/cfb.js:
       }
     }
     // 각주·미주 쪽 하단 정렬 (한글은 본문 아래 쪽 밑단에 배치)
-    var notesAll = hxPage.querySelectorAll('.hx-pagecard .hx-notes');
+    var notesAll = root.querySelectorAll('.hx-pagecard .hx-notes');
     for (var na = 0; na < notesAll.length; na++) {
       var nB = notesAll[na], hostC = nB.closest('.hx-pagecard');
       if (!hostC) continue;
@@ -2735,19 +2796,19 @@ cfb/cfb.js:
       if (gapC > 6) nB.style.marginTop = Math.round(gapC - 2) + 'px';
     }
     // 최종 정리: 분할·이동 과정에서 생긴 빈 쪽 제거 (쪽번호 부여 직전)
-    var finalCards = hxPage.querySelectorAll('.hx-pagecard');
+    var finalCards = root.querySelectorAll('.hx-pagecard');
     if (finalCards.length > 1) {
       for (var fc = finalCards.length - 1; fc >= 0; fc--) {
         var cdF = finalCards[fc];
         if (!cdF.textContent.trim() && !cdF.querySelector('table,img,svg') &&
-            hxPage.querySelectorAll('.hx-pagecard').length > 1) cdF.remove();
+            root.querySelectorAll('.hx-pagecard').length > 1) cdF.remove();
       }
     }
     // 머리말·꼬리말: 각 쪽 여백 영역에 복제 배치 (한글은 쪽마다 반복해 인쇄)
-    var hdSrc = hxPage.querySelector('.hx-headersrc');
-    var ftSrc = hxPage.querySelector('.hx-footersrc');
+    var hdSrc = root.querySelector('.hx-headersrc');
+    var ftSrc = root.querySelector('.hx-footersrc');
     if (hdSrc || ftSrc) {
-      var cardsHF = hxPage.querySelectorAll('.hx-pagecard');
+      var cardsHF = root.querySelectorAll('.hx-pagecard');
       var padTopPx = pi.mt * info.U2PX, padBotPx = pi.mb * info.U2PX;
       var sideL = pi.ml * info.U2PX, sideR = pi.mr * info.U2PX;
       for (var hi = 0; hi < cardsHF.length; hi++) {
@@ -2773,10 +2834,33 @@ cfb/cfb.js:
       if (ftSrc) ftSrc.remove();
     }
     // 쪽 번호: 카드 속성으로만 표기 (별도 노드 금지 — 인쇄 페이지 분절을 교란함)
-    var cardsN = hxPage.querySelectorAll('.hx-pagecard');
+    var cardsN = root.querySelectorAll('.hx-pagecard');
     for (var cn = 0; cn < cardsN.length; cn++)
       cardsN[cn].setAttribute('data-pg', (cn + 1) + ' / ' + cardsN.length);
 
+  }
+
+  function showPaged(info, badgeText) {
+    blobUrls = info.urls || [];
+    var sections = Array.from(hxPage.querySelectorAll('.hx-section'));
+    if (!sections.length) sections = [hxPage];
+    var printRules = [], maxWidth = 0;
+    hxZoom.style.zoom = 1;
+    sections.forEach(function(section, index) {
+      var pi = section._pageInfo || info.pageInfo;
+      if (![pi.w,pi.h,pi.ml,pi.mr,pi.mt,pi.mb].every(Number.isFinite) || [pi.ml,pi.mr,pi.mt,pi.mb].some(function(n){return n<0;}) || pi.w <= pi.ml+pi.mr || pi.h <= pi.mt+pi.mb || pi.w > 300000 || pi.h > 300000) throw new Error('지원할 수 없는 용지 크기 또는 여백');
+      layoutSection(section, Object.assign({}, info, {pageInfo:pi}));
+      maxWidth = Math.max(maxWidth, pi.w * info.U2PX);
+      var name = 'hxSheet'+index, w = (pi.w*info.U2MM).toFixed(3), h=(pi.h*info.U2MM).toFixed(3);
+      var padding = [pi.mt,pi.mr,pi.mb,pi.ml].map(function(n){return (n*info.U2MM).toFixed(3)+'mm';}).join(' ');
+      section.querySelectorAll('.hx-pagecard').forEach(function(card) { card.style.page=name;card.dataset.sheet=name; });
+      printRules.push('@page '+name+' { size:'+w+'mm '+h+'mm; margin:0; } [data-sheet="'+name+'"] {width:'+w+'mm!important;height:'+h+'mm!important;padding:'+padding+'!important;}');
+    });
+    pagePxWidth = maxWidth;
+    hxPage.style.width = maxWidth+'px';
+    var all = Array.from(hxPage.querySelectorAll('.hx-pagecard'));
+    all.forEach(function(card,i){card.dataset.pg=(i+1)+' / '+all.length;});
+    $('pageStyle').textContent = '@media print { .hx-page,.hx-section {width:auto!important;min-height:0!important;padding:0!important;margin:0!important;} .hx-pagecard {min-height:0!important;margin:0!important;box-shadow:none!important;break-after:page;overflow:visible!important;} .hx-pagecard.hx-tall {height:auto!important;} .hx-section:last-child .hx-pagecard:last-child {break-after:auto;} '+printRules.join(' ')+' }';
     zoombox.style.display = 'flex';
     btnPdf.style.display = 'inline-block';
     btnReset.style.display = 'inline-block';
@@ -2793,14 +2877,12 @@ cfb/cfb.js:
     applyZoomMode();
     busy = false;
     setLoading(false);
+    if (window.hxReaderTools) window.hxReaderTools.ready();
     scheduleFit();
     try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit); } catch (e) {}
   }
 
-  function openHWPX(u8) {
-    var files;
-    try { files = window.HWPLIB.unzipSync(u8); }
-    catch (e) { return fail('압축 해제 실패: ' + e.message, 'HWPX 구조가 손상되었을 수 있음 (망간 전송 손상 등)'); }
+  function openHWPX(files) {
     var keys = Object.keys(files);
     if (!keys.some(function (k) { return /header\.xml$/i.test(k); })) {
       if (keys.some(function (k) { return /^word\//.test(k); })) return fail('이 파일은 Word 문서(docx)', '확장자만 hwp로 되어 있음 — Word에서 열어야 함');
@@ -2817,11 +2899,11 @@ cfb/cfb.js:
     }
   }
 
-  var currentBinary = null;
-  function openBinary(binaryStr) {
-    currentBinary = binaryStr;
+  var currentBinary = null, currentPrepared = null;
+  function openBinary(binaryStr, prepared) {
+    currentBinary = binaryStr; currentPrepared = prepared;
     try {
-      var info = window.HWPBIN.render(binaryStr, hxPage, document);
+      var info = window.HWPBIN.render(binaryStr, hxPage, document, currentPrepared);
       showPaged(info, 'HWP 5.0 · 전용 렌더러');
       btnCompat.style.display = 'inline-block';
       btnCompat.textContent = '호환 모드';
@@ -2869,7 +2951,7 @@ cfb/cfb.js:
         binWrap.style.display = 'none'; binHint.style.display = 'none';
         try {
           hxPage.innerHTML = '';
-          var info = window.HWPBIN.render(binaryStr, hxPage, document);
+          var info = window.HWPBIN.render(binaryStr, hxPage, document, currentPrepared);
           showPaged(info, 'HWP 5.0 · 전용 렌더러 (호환 모드 사용 불가)');
           btnCompat.style.display = 'inline-block';
           btnCompat.textContent = '호환 모드';
@@ -2883,6 +2965,7 @@ cfb/cfb.js:
 
   function toggleRenderer() {
     if (!currentBinary) return;
+    if (window.hxReaderTools) window.hxReaderTools.clear();
     var toLegacy = hxScroll.style.display === 'block';
     if (binInstance) { try { binInstance.distory(); } catch (e) {} binInstance = null; }
     binViewer.innerHTML = ''; hxPage.innerHTML = '';
@@ -2890,7 +2973,7 @@ cfb/cfb.js:
     if (toLegacy) openLegacy(currentBinary, true);
     else {
       try {
-        var info = window.HWPBIN.render(currentBinary, hxPage, document);
+        var info = window.HWPBIN.render(currentBinary, hxPage, document, currentPrepared);
         showPaged(info, 'HWP 5.0 · 전용 렌더러');
         btnCompat.style.display = 'inline-block';
         btnCompat.textContent = '호환 모드';
@@ -2906,6 +2989,7 @@ cfb/cfb.js:
   }
 
   function handleFiles(list) {
+    if(busy)return;
     var docs = [], fonts = [];
     for (var i = 0; i < list.length; i++) {
       if (/\.(ttf|otf|ttc)$/i.test(list[i].name)) fonts.push(list[i]);
@@ -2914,6 +2998,7 @@ cfb/cfb.js:
     var chain = Promise.resolve();
     fonts.forEach(function (f) {
       chain = chain.then(function () {
+        if(f.size>32*1024*1024)throw new Error('글꼴 파일은 32MB 이하만 지원합니다.');
         return f.arrayBuffer().then(function (buf) {
           var name = f.name.replace(/\.(ttf|otf|ttc)$/i, '').trim();
           return registerFont(name, buf, true).then(function () {
@@ -2929,7 +3014,7 @@ cfb/cfb.js:
       if (docs.length > 1) setTimeout(function () {
         try { fname.textContent += '  · 첫 번째 문서만 열림 (' + docs.length + '개 중)'; } catch (e) {}
       }, 800);
-    });
+    }).catch(function(e){fail('파일 준비 실패',e.message);});
   }
 
   function setLoading(on, msg) {
@@ -2964,6 +3049,7 @@ cfb/cfb.js:
   function serializeNode(node) {
     if (node.nodeType === 3) return node.nodeValue;
     if (node.nodeType !== 1) return '';
+    if (node.matches('.hx-runhead,.hx-runfoot,.hx-headersrc,.hx-footersrc,.hx-dbg')) return '';
     var tag = node.tagName, out = '';
     if (tag === 'BR') return '\n';
     for (var i = 0; i < node.childNodes.length; i++) out += serializeNode(node.childNodes[i]);
@@ -2972,8 +3058,10 @@ cfb/cfb.js:
       return out.replace(/\s*\n+\s*/g, ' ').replace(/\s+$/, '') + '\t';   // 셀 안 줄바꿈 → 공백 (엑셀 행 유지)
     if (tag === 'TR') return out.replace(/\t$/, '') + '\n';
     if (tag === 'TABLE' || tag === 'P') return out + '\n';
+    if (node.classList.contains('hx-pagecard')) return out + '\n\n';
     return out;
   }
+  window.hxExtractText = function(root) { return serializeNode(root).replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim(); };
   document.addEventListener('copy', function (e) {
     try {
       var sel = window.getSelection();
@@ -2993,9 +3081,11 @@ cfb/cfb.js:
   });
 
   function openFile(file) {
-    if (!file) return;
-    busy = true;
+    if (!file || busy) return;
     reset();
+    if(file.size>64*1024*1024)return fail('파일 크기 초과','64MB 이하의 문서로 다시 시도하세요.');
+    busy = true;
+    var token=loadGeneration;
     setLoading(true, '문서 읽는 중… (' + (file.size / 1024).toFixed(0) + ' KB)');
     fname.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
     // PDF로 저장할 때 브라우저는 '문서 제목'을 기본 파일명·속성으로 쓴다.
@@ -3003,6 +3093,7 @@ cfb/cfb.js:
     try { document.title = file.name.replace(/\.(hwp|hwpx)$/i, ''); } catch (eT) {}
     var r = new FileReader();
     r.onload = function (ev) {
+      if(token!==loadGeneration)return;
       var u8 = new Uint8Array(ev.target.result);
       if (u8.length < 8) return fail('파일이 비어있거나 너무 작음', '');
       // 매직바이트 판별
@@ -3016,11 +3107,13 @@ cfb/cfb.js:
         return;
       }
       if (u8[0] === 0x50 && u8[1] === 0x4B) {           // PK → zip → HWPX
-        openHWPX(u8);
+        setLoading(true,'문서 압축을 해제하는 중…');
+        unpackInWorker(u8,'zip',openHWPX);
       } else if (u8[0] === 0xD0 && u8[1] === 0xCF) {    // CFB → HWP 5.0
         var s = '', CH = 0x8000;
         for (var i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
-        openBinary(s);
+        setLoading(true,'문서 구조를 읽는 중…');
+        unpackInWorker(u8,'hwp',function(prepared){openBinary(s,prepared);});
       } else {
         var head = '';
         for (var j = 0; j < Math.min(24, u8.length); j++) head += String.fromCharCode(u8[j]);
@@ -3032,13 +3125,14 @@ cfb/cfb.js:
         }
       }
     };
-    r.onerror = function () { fail('파일 읽기 실패', ''); };
+    r.onerror = function () { if(token===loadGeneration)fail('파일 읽기 실패', ''); };
     r.readAsArrayBuffer(file);
   }
 
   $('btnOpen').addEventListener('click', function () { fileInput.click(); });
   drop.addEventListener('click', function () { fileInput.click(); });
   btnReset.addEventListener('click', reset);
+  $('cancelLoad').addEventListener('click',reset);
   btnPdf.addEventListener('click', function () {
     // 글꼴 로딩·줄 맞춤이 끝난 뒤 인쇄 (직후 클릭 시 쪽 나눔이 어긋나는 것 방지)
     var go = function () { scheduleFit(); setTimeout(function () { window.print(); }, 120); };
@@ -3117,8 +3211,8 @@ cfb/cfb.js:
   });
   var rzT = null;
   window.addEventListener('resize', function () {
-    if (!fitMode || hxScroll.style.display !== 'block') return;
-    clearTimeout(rzT); rzT = setTimeout(fitWidth, 120);
+    if (zoomMode === 'pct' || hxScroll.style.display !== 'block') return;
+    clearTimeout(rzT); rzT = setTimeout(applyZoomMode, 120);
   });
   fileInput.addEventListener('change', function () { handleFiles(fileInput.files); fileInput.value = ''; });
 
@@ -3132,6 +3226,40 @@ cfb/cfb.js:
     e.preventDefault();
     if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
   });
+})();
+</script>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id),root=$('hxPage'),pane=$('hxScroll');
+let cards=[],index=[],hits=[],selected=-1,current=0,timer,frame,generation=0,composing=false;
+const supported=!!(window.CSS&&CSS.highlights&&window.Highlight);
+function clearHighlights(){if(supported){CSS.highlights.delete('hxSearch');CSS.highlights.delete('hxCurrent');}else{const sel=window.getSelection();if(sel&&root.contains(sel.anchorNode))sel.removeAllRanges();}}
+function setHighlights(){if(!supported)return;const h=new Highlight();hits.forEach(r=>h.add(r));CSS.highlights.set('hxSearch',h);if(selected>=0)CSS.highlights.set('hxCurrent',new Highlight(hits[selected]));}
+function clear(){generation++;clearTimeout(timer);timer=null;cards=[];index=[];hits=[];selected=-1;current=0;clearHighlights();$('docTools').hidden=true;$('searchText').value='';$('searchCount').textContent='';$('appStatus').textContent='파일을 선택하면 읽기를 시작합니다 · Ctrl+O 파일 열기';}
+function updatePage(){if(!cards.length)return;const top=pane.getBoundingClientRect().top+28;let lo=0,hi=cards.length-1;while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(cards[mid].getBoundingClientRect().top<=top)lo=mid;else hi=mid-1;}current=lo;if(document.activeElement!==$('pageNumber'))$('pageNumber').value=current+1;$('pagePrev').disabled=current===0;$('pageNext').disabled=current===cards.length-1;}
+function go(n){if(!cards.length)return;n=Number(n);n=Number.isFinite(n)?Math.trunc(n):current+1;n=Math.max(1,Math.min(cards.length,n));$('pageNumber').value=n;pane.scrollTop+=cards[n-1].getBoundingClientRect().top-pane.getBoundingClientRect().top-28;updatePage();}
+function fold(text){let lower='',starts=[],ends=[],offset=0;for(const char of text){const f=char.toLowerCase();for(let i=0;i<f.length;i++){starts.push(offset);ends.push(offset+char.length);}lower+=f;offset+=char.length;}return {lower,starts,ends};}
+function buildIndex(){index=[];const blocks=Array.from(root.querySelectorAll('.hx-seg,p,.hx-p,td,th')).filter(e=>!e.closest('.hx-runhead,.hx-runfoot,.hx-dbg')&&!e.querySelector('.hx-seg,p,.hx-p,td,th'));for(const block of blocks){const walker=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);let nodes=[],text='',node;while((node=walker.nextNode())){nodes.push({node,start:text.length});text+=node.nodeValue;}if(text)index.push({nodes,...fold(text)});}}
+function ready(){cards=Array.from(root.querySelectorAll('.hx-pagecard'));buildIndex();$('docTools').hidden=!cards.length;$('pageNumber').max=cards.length;$('pageTotal').textContent='/ '+cards.length+'쪽';$('appStatus').textContent=cards.length+'쪽 · 문서 자동 저장 없음 · Ctrl+F 검색';updatePage();}
+function nodeAt(nodes,pos,end){let lo=0,hi=nodes.length-1;while(lo<hi){const m=Math.ceil((lo+hi)/2);if(nodes[m].start<(end?pos:pos+1))lo=m;else hi=m-1;}return nodes[lo];}
+function move(delta){if(!hits.length)return;selected=(selected+delta+hits.length)%hits.length;const range=hits[selected];if(supported)CSS.highlights.set('hxCurrent',new Highlight(range));else{const sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);}const r=range.getBoundingClientRect(),p=pane.getBoundingClientRect();pane.scrollTop+=r.top-p.top-pane.clientHeight/3;if(r.left<p.left||r.right>p.right)pane.scrollLeft+=r.left-p.left-pane.clientWidth/3;$('searchCount').textContent=(selected+1)+' / '+hits.length+(hits.length===10000?' (상한)':'');updatePage();}
+async function search(){const token=++generation;clearHighlights();hits=[];selected=-1;const q=$('searchText').value.toLowerCase();if(!q){$('searchCount').textContent='';return;}$('searchCount').textContent='찾는 중…';const found=[];
+for(let i=0;i<index.length;i++){const block=index[i];let at=0;while((at=block.lower.indexOf(q,at))!==-1){const start=block.starts[at],end=block.ends[at+q.length-1],first=nodeAt(block.nodes,start,false),last=nodeAt(block.nodes,end,true);const r=document.createRange();r.setStart(first.node,start-first.start);r.setEnd(last.node,end-last.start);found.push(r);at+=q.length;if(found.length===10000)break;}if(found.length===10000)break;if(i%100===99){await new Promise(r=>setTimeout(r,0));if(token!==generation)return;}}
+if(token!==generation)return;hits=found;setHighlights();$('searchCount').textContent=hits.length?'':'결과 없음';if(hits.length)move(1);
+}
+window.hxReaderTools={clear,ready};
+$('pagePrev').onclick=()=>go(current);$('pageNext').onclick=()=>go(current+2);$('pageNumber').onchange=()=>go($('pageNumber').value);
+pane.addEventListener('scroll',()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(updatePage);},{passive:true});
+function schedule(){generation++;clearTimeout(timer);timer=setTimeout(()=>{timer=null;search();},180);}
+$('searchText').oncompositionstart=()=>{composing=true;generation++;clearTimeout(timer);timer=null;};$('searchText').oncompositionend=()=>{composing=false;schedule();};$('searchText').oninput=()=>{if(!composing)schedule();};
+$('searchText').onkeydown=e=>{if(e.isComposing||composing)return;if(e.key==='Enter'){e.preventDefault();if(timer){clearTimeout(timer);timer=null;search();}else move(e.shiftKey?-1:1);}if(e.key==='Escape'){clearTimeout(timer);timer=null;$('searchText').value='';search();$('searchText').blur();}};
+$('searchPrev').onclick=()=>move(-1);$('searchNext').onclick=()=>move(1);
+$('saveText').onclick=()=>{const text=window.hxExtractText(root),u=URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=u;a.download=(document.title||'document')+'.txt';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);$('appStatus').textContent='텍스트 다운로드를 요청했습니다. 반복 머리말·꼬리말과 도형 배치는 제외됩니다.';};
+$('drop').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click();}};
+window.addEventListener('keydown',e=>{if(!(e.ctrlKey||e.metaKey))return;if(e.key.toLowerCase()==='o'){e.preventDefault();$('fileInput').click();}if(e.key.toLowerCase()==='f'&&cards.length){e.preventDefault();$('searchText').focus();$('searchText').select();}});
+window.addEventListener('beforeprint',clearHighlights);window.addEventListener('afterprint',setHighlights);
 })();
 </script>
 </body>
