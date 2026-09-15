@@ -1,5 +1,5 @@
 // Cache only the app shell, never documents or registered fonts.
-const PREFIX='hwp-viewer-',SCOPE=new URL(self.registration.scope),CACHE=PREFIX+'v46-'+encodeURIComponent(SCOPE.href);
+const PREFIX='hwp-viewer-',SCOPE=new URL(self.registration.scope),CACHE=PREFIX+'v50-'+encodeURIComponent(SCOPE.href);
 const CORE=new URL('index-1.html',SCOPE).href,MANIFEST=new URL('manifest.webmanifest',SCOPE).href;
 function shellKey(request){const url=new URL(request.url);if(url.origin!==SCOPE.origin)return null;
   if(url.pathname===new URL(CORE).pathname)return CORE;

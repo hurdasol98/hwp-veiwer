@@ -151,7 +151,7 @@ header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v46</span></h1>
+    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v50</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -475,13 +475,19 @@ cfb/cfb.js:
   function renderTable(tbl, ctx, env) {
     var table = env.doc.createElement('table');
     table.className = 'hx-tbl';
+    var outerMargin = firstByLn(tbl, 'outMargin');
+    if (outerMargin) table.style.margin = ['top','right','bottom','left'].map(function (side) {
+      return (Math.max(0, num(outerMargin, side, 0)) * U2PX) + 'px';
+    }).join(' ');
     // 쪽 나눔 지정: NONE=나누지 않음 / TABLE·CELL=나눌 수 있음 (셸의 분할 판단에 쓰임)
     var pbAttr = String(attr(tbl, 'pageBreak', 'CELL')).toUpperCase();
     table.setAttribute('data-split', pbAttr === 'NONE' ? '0' : '2');
     var tblBf = ctx.borderFill[attr(tbl, 'borderFillIDRef', '')];
     // 열 너비 확정 (L8): cellAddr/cellSpan/cellSz 기반 colgroup
     (function () {
-      var cells = descByLn(tbl, 'tc').map(function (tc) {
+      var cells = childrenByLn(tbl, 'tr').reduce(function (out, row) {
+        return out.concat(childrenByLn(row, 'tc'));
+      }, []).map(function (tc) {
         var ca = firstByLn(tc, 'cellAddr'), cs = firstByLn(tc, 'cellSpan'), sz = firstByLn(tc, 'cellSz');
         return { col: ca ? num(ca, 'colAddr', 0) : 0, span: cs ? num(cs, 'colSpan', 1) : 1, w: sz ? num(sz, 'width', 0) : 0 };
       }).filter(function (c) { return c.w > 0; });
@@ -524,13 +530,18 @@ cfb/cfb.js:
         if (szH && num(szH, 'height', 0) > 0) td.style.height = (num(szH, 'height', 0) * U2PX) + 'px';
         var bf = ctx.borderFill[attr(tc, 'borderFillIDRef', '')] || tblBf;
         if (bf) {
-          td.style.borderLeft = bf.left || '1px solid #999';
-          td.style.borderRight = bf.right || '1px solid #999';
-          td.style.borderTop = bf.top || '1px solid #999';
-          td.style.borderBottom = bf.bottom || '1px solid #999';
+          td.style.borderLeft = bf.left || 'none';
+          td.style.borderRight = bf.right || 'none';
+          td.style.borderTop = bf.top || 'none';
+          td.style.borderBottom = bf.bottom || 'none';
           if (bf.bg) td.style.background = bf.bg;
         }
         var sub = firstByLn(tc, 'subList');
+        if (sub) td.style.verticalAlign = { TOP:'top', CENTER:'middle', BOTTOM:'bottom' }[attr(sub, 'vertAlign', 'CENTER')] || 'middle';
+        var margin = attr(tc, 'hasMargin', '0') === '1' ? firstByLn(tc, 'cellMargin') : firstByLn(tbl, 'inMargin');
+        if (margin) td.style.padding = ['top','right','bottom','left'].map(function (side) {
+          return (Math.max(0, num(margin, side, 0)) * U2PX) + 'px';
+        }).join(' ');
         if (sub && attr(sub, 'textDirection', '') === 'VERTICAL') {
           td.style.writingMode = 'vertical-rl';
           td.style.textOrientation = 'upright';
@@ -538,9 +549,10 @@ cfb/cfb.js:
         }
         if (sub) {
           var cfs = { prevEnd: null };
-          childrenByLn(sub, 'p').forEach(function (p) {
+          var cellParagraphs = childrenByLn(sub, 'p');
+          cellParagraphs.forEach(function (p, paragraphIndex) {
             var sg = parseSegs(p);
-            if (segEligible(p, sg)) td.appendChild(renderParagraphSeg(p, ctx, env, sg, cfs));
+            if (segEligible(p, sg)) td.appendChild(renderParagraphSeg(p, ctx, env, sg, cfs, null, paragraphIndex === cellParagraphs.length - 1));
             else { cfs.prevEnd = null; td.appendChild(renderParagraph(p, ctx, env)); }
           });
         }
@@ -583,7 +595,10 @@ cfb/cfb.js:
   var PT2PX = 96 / 72;
 
   function parseSegs(p) {
-    var arr = descByLn(p, 'lineseg');
+    // Nested tables have independent line coordinates; never mix them into
+    // the containing paragraph's page/spacing calculations.
+    var segArray = firstByLn(p, 'linesegarray');
+    var arr = segArray ? childrenByLn(segArray, 'lineseg') : [];
     if (!arr.length) return [];
     var segs = [];
     for (var i = 0; i < arr.length; i++) {
@@ -637,7 +652,7 @@ cfb/cfb.js:
     return out;
   }
 
-  function renderParagraphSeg(p, ctx, env, segs, flowState, pager) {
+  function renderParagraphSeg(p, ctx, env, segs, flowState, pager, trimCellTail) {
     var pp = ctx.paraPr[attr(p, 'paraPrIDRef', '')];
     var pgBrk = attr(p, 'pageBreak', '0') === '1';
     var align = pp ? pp.align : 'justify';
@@ -651,18 +666,20 @@ cfb/cfb.js:
       return d;
     };
     var div = mkDiv();
+    if (pager) div.dataset.y0 = String(segs[0].y);
     if (pager) pager.cur().appendChild(div);   // pager 모드: 카드에 직접 커밋
     var gy = function (s) { return (s.gy !== undefined) ? s.gy : s.y; };
     if (flowState && flowState.prevEnd !== null) {
       var gap = gy(segs[0]) - flowState.prevEnd;   // 흐름 시작(prevEnd 없음)엔 gap 없음 — 위치는 컨테이너/개체가 담당
-      if (gap > 0.05 && gap < 2000) div.style.marginTop = (gap * PT2PX) + 'px';
+      if (gap > 0.05 && gap < 2000) { div.style.marginTop = (gap * PT2PX) + 'px'; div.dataset.sourceGap = '1'; }
     }
     var chars = linearRuns(p, ctx);
     var segIdx = 0, subIdx = 0, line = null, sink = null, span = null, buf = '', curCs;
     var openLine = function () {
       line = env.doc.createElement('div');
       var s = segs[segIdx];
-      line.style.height = (s.box * PT2PX) + 'px';
+      if (pager) div.dataset.sourceEnd = String(s.y + s.h);
+      line.style.height = ((trimCellTail && segIdx === segs.length - 1 ? s.h : s.box) * PT2PX) + 'px';
       line.style.lineHeight = (s.h * PT2PX) + 'px';
       // overflow 봉인 제거: height 고정으로 충분, hidden은 디센더를 절단해 '중간 라인' 유발
 
@@ -703,6 +720,7 @@ cfb/cfb.js:
         if (!div.childNodes.length && div.parentNode) div.parentNode.removeChild(div);
         var np = pager.page(gy(s));
         div = mkDiv();
+        div.dataset.y0 = String(s.y);
         np.appendChild(div);
         flowState.prevEnd = null;
         var g2 = gy(s) - (flowState.base || 0);
@@ -773,6 +791,32 @@ cfb/cfb.js:
       if (pp.spaceBefore) div.style.marginTop = pp.spaceBefore + 'px';
       if (pp.spaceAfter) div.style.marginBottom = pp.spaceAfter + 'px';
     }
+    var inlineNodes = childrenByLn(p, 'run').reduce(function (out, run) {
+      return out.concat(Array.from(run.children));
+    }, []);
+    var objectOnly = inlineNodes.some(function (node) { return ln(node) === 'tbl'; }) &&
+      inlineNodes.every(function (node) {
+        return ln(node) === 'tbl' || ln(node) === 'secPr' || ln(node) === 'ctrl' ||
+          (ln(node) === 't' && !node.textContent.trim());
+      });
+    if (objectOnly) {
+      // Tables already contain their text. Whitespace around them must not
+      // generate extra anonymous line boxes or duplicate paragraph spacing.
+      div.style.display = 'flow-root'; div.style.lineHeight = 'normal';
+      div.style.minHeight = '0'; div.style.marginTop = '0'; div.style.marginBottom = '0';
+      div.style.textIndent = '0'; div.style.paddingLeft = '0';
+      inlineNodes.forEach(function (node) {
+        if (ln(node) === 'tbl') { markAnchor(node, div); div.appendChild(renderTable(node, ctx, env)); }
+      });
+      var sourceSegs = parseSegs(p);
+      if (sourceSegs.length === 1 && inlineNodes.filter(function (node) {return ln(node) === 'tbl';}).every(function (node) {
+        var pos = firstByLn(node, 'pos'); return pos && attr(pos, 'treatAsChar', '0') === '1';
+      })) {
+        div.style.minHeight = (sourceSegs[0].box * PT2PX) + 'px';
+        div.dataset.sourceLineHeight = String(sourceSegs[0].box * PT2PX);
+      }
+      return div;
+    }
     var hasContent = false;
     childrenByLn(p, 'run').forEach(function (run) {
       var cp = ctx.charPr[attr(run, 'charPrIDRef', '')];
@@ -819,6 +863,49 @@ cfb/cfb.js:
     });
     if (!hasContent) div.innerHTML = '&nbsp;';
     return div;
+  }
+
+  // Split a multi-object paragraph only when a stored page reset falls exactly
+  // between its direct controls/text nodes. Never guess a boundary inside text.
+  function splitObjectPages(p) {
+    var segs = parseSegs(p), breaks = [];
+    if (!descByLn(p, 'tbl').length) return [p];
+    for (var i = 1; i < segs.length; i++) {
+      if (segs[i - 1].y - segs[i].y > 120) breaks.push(segs[i].pos);
+    }
+    if (!breaks.length) return [p];
+    var entries = [], offset = 0, valid = true;
+    childrenByLn(p, 'run').forEach(function (run) {
+      Array.from(run.children).forEach(function (node) {
+        var kind = ln(node), length;
+        if (kind === 't' && !node.children.length) length = node.textContent.length;
+        else if (kind === 'tbl' || kind === 'ctrl') length = 8;
+        else { valid = false; return; }
+        entries.push({run:run,node:node,start:offset}); offset += length;
+      });
+    });
+    if (!valid || !breaks.every(function (pos) { return entries.some(function (entry) {return entry.start === pos;}); })) return [p];
+    var ranges = [0].concat(breaks), array = firstByLn(p, 'linesegarray');
+    return ranges.map(function (start, index) {
+      var end = index + 1 < ranges.length ? ranges[index + 1] : Infinity;
+      var part = p.cloneNode(false), previousRun = null, runCopy;
+      if (index) part.setAttribute('pageBreak', '1');
+      entries.forEach(function (entry) {
+        if (entry.start < start || entry.start >= end) return;
+        if (entry.run !== previousRun) {
+          runCopy = entry.run.cloneNode(false);part.appendChild(runCopy);previousRun = entry.run;
+        }
+        runCopy.appendChild(entry.node.cloneNode(true));
+      });
+      var segCopy = array.cloneNode(false);
+      childrenByLn(array, 'lineseg').forEach(function (seg) {
+        var pos = num(seg, 'textpos', 0);
+        if (pos < start || pos >= end) return;
+        var copy = seg.cloneNode(true);copy.setAttribute('textpos', String(pos - start));segCopy.appendChild(copy);
+      });
+      part.appendChild(segCopy);
+      return part;
+    });
   }
 
   /* ---------- 진입점 ---------- */
@@ -897,34 +984,39 @@ cfb/cfb.js:
       secDiv._pageInfo = Object.assign({}, pageInfo || { w:59528,h:84188,ml:8504,mr:8504,mt:5668,mb:4252 });
       var root = sdoc.documentElement;
       var flowState = { prevEnd: null, base: 0 };
-      var prevRawEnd = -1;
+      var pageDiv = null;
+      var pager = {
+        lastEnd: -1,
+        cur: function () { return pageDiv; },
+        shouldBreak: function (y) { return this.lastEnd - y > 120; },
+        mark: function (end) { this.lastEnd = Math.max(this.lastEnd, end); },
+        page: function () {
+          pageDiv = docRef.createElement('div');pageDiv.className = 'hx-pagecard';
+          secDiv.appendChild(pageDiv);this.lastEnd = -1;
+          flowState.prevEnd = null;flowState.base = 0;
+          return pageDiv;
+        }
+      };
+      pager.page();
       try { window.__hxPageTopPx = (pageInfo ? pageInfo.mt : 5668) * U2PX; } catch (eT) {}
-      childrenByLn(root, 'p').forEach(function (p) {
-        var segs = parseSegs(p);
-        var hasY = segs.length > 0;
-        // 줄 좌표가 앞줄보다 '충분히' 위로 되돌아가면 새 쪽 시작 신호.
-        // 단 표·글상자 안 문단은 자체 좌표계라 늘 0에서 시작하므로 제외하고,
-        // 되돌아간 폭이 작으면(같은 쪽 안의 배치 차이) 쪽 나누기로 보지 않는다.
-        var yReset = hasY && prevRawEnd >= 0 && segs[0].y + 0.5 < prevRawEnd &&
-                     (prevRawEnd - segs[0].y) > 120 && !p.parentNode.closest('tbl, tc, subList');
-        if (yReset) flowState.prevEnd = null; // 새 배치 흐름
-        if (hasY) prevRawEnd = segs[segs.length - 1].y + segs[segs.length - 1].box;
+      childrenByLn(root, 'p').reduce(function (out, p) {return out.concat(splitObjectPages(p));}, []).forEach(function (p) {
+        var segs = parseSegs(p), hasY = segs.length > 0;
+        var explicit = attr(p, 'pageBreak', '0') === '1';
+        if (pageDiv.childNodes.length && (explicit || (hasY && pager.shouldBreak(segs[0].y)))) pager.page();
         if (segEligible(p, segs)) {
-          var segEl = renderParagraphSeg(p, ctx, env, segs, flowState);
-          if (yReset && segEl.setAttribute) segEl.setAttribute('data-pagebreak', '1');
-          secDiv.appendChild(segEl);
+          renderParagraphSeg(p, ctx, env, segs, flowState, pager);
         } else {
           var el = renderParagraph(p, ctx, env);
-          if (yReset) el.setAttribute('data-pagebreak', '1');
           if (hasY) {
-            var startRef = (flowState.prevEnd !== null) ? flowState.prevEnd : segs[0].y;
+            var startRef = flowState.prevEnd !== null ? flowState.prevEnd : 0;
             var gap = segs[0].y - startRef;
-            if (gap > 0.05 && gap < 2000) el.style.marginTop = (gap * PT2PX) + 'px';
-            secDiv.appendChild(el);
-            var endSeg = segs[segs.length - 1].y + segs[segs.length - 1].box;
-            var endReal = segs[0].y + (el.offsetHeight || 0) / PT2PX;
-            flowState.prevEnd = Math.max(endSeg, endReal);
-          } else { flowState.prevEnd = null; secDiv.appendChild(el); }
+            if (gap > 0.05 && gap < 2000) {el.style.marginTop = (gap * PT2PX) + 'px';el.dataset.sourceGap = '1';}
+            var last = segs[segs.length - 1];
+            el.dataset.fy0 = String(segs[0].y);el.dataset.fend = String(last.y + last.box);
+            if (el.dataset.sourceLineHeight && segs.length === 1) el.dataset.sourceEnd = String(last.y + last.h);
+            flowState.prevEnd = last.y + last.box;pager.mark(flowState.prevEnd);
+          } else flowState.prevEnd = null;
+          pageDiv.appendChild(el);
         }
       });
       if (env.notes.length) {
@@ -2289,10 +2381,20 @@ cfb/cfb.js:
 
   function paginateSection(sec, contentHpx) {
     var src = Array.prototype.slice.call(sec.children);
+    var sheet = sec._pageInfo, originalWidth = sec.style.width;
+    // Measure pending paragraphs at the same content width they will have
+    // inside the padded sheet, not at the full paper width.
+    if (sheet) sec.style.width = ((sheet.w - sheet.ml - sheet.mr) / 75) + 'px';
     var card = null, used = 0, hasReal = false;
     var newCard = function () {
       card = document.createElement('div');
       card.className = 'hx-pagecard';
+      if (sheet) {
+        card.style.width = (sheet.w / 75) + 'px';
+        card.style.minHeight = (sheet.h / 75) + 'px';
+        card.style.padding = [sheet.mt,sheet.mr,sheet.mb,sheet.ml].map(function(n){return (n / 75) + 'px';}).join(' ');
+        card.style.setProperty('--hx-padtop', (sheet.mt / 75) + 'px');
+      }
       sec.appendChild(card);
       used = 0; hasReal = false;
     };
@@ -2332,12 +2434,8 @@ cfb/cfb.js:
         markReal(el);
         continue;
       }
-      // 리셋 흐름의 유령 간격: 빈 문단의 대형 마진 제거
-      if (el.classList.contains('hx-seg') && !el.textContent.trim() &&
-          (parseFloat(el.style.marginTop) || 0) > 60) {
-        el.style.marginTop = '0';
-        h = hOf(el);
-      }
+      // A blank paragraph can carry intentional source spacing (e.g. covers).
+      // Do not discard that space merely because it exceeds an arbitrary size.
       if (h <= contentHpx - used + 0.5) { card.appendChild(el); used += h; markReal(el); continue; }
       if (el.classList.contains('hx-seg') && el.children.length > 1) {
         // 줄 단위 분할: 들어가는 만큼 채우고 잔여는 새 카드의 복제 컨테이너로
@@ -2423,6 +2521,7 @@ cfb/cfb.js:
         markReal(el);
       }
     }
+    if (sheet) sec.style.width = originalWidth;
   }
 
   // Preserve only fully described, monotonic page-local source layouts. Missing
@@ -2484,7 +2583,7 @@ cfb/cfb.js:
       var excess = card.scrollHeight - (parseFloat(card.style.minHeight) || card.scrollHeight);
       if (excess > 1) {
         var gaps = Array.prototype.filter.call(card.children, function (u) {
-          return (parseFloat(u.style.marginTop) || 0) > 2;
+          return u.dataset.sourceGap !== '1' && (parseFloat(u.style.marginTop) || 0) > 2;
         });
         var totalGap = gaps.reduce(function (a, u) { return a + parseFloat(u.style.marginTop); }, 0);
         if (totalGap > 1) {
