@@ -1,7 +1,7 @@
 {
   "name": "HWP 뷰어",
   "short_name": "HWP 뷰어",
-  "description": "오프라인 한글 뷰어 v41 · 문서 검색, 쪽 이동, 텍스트 저장",
+  "description": "오프라인 한글 뷰어 v42 · 문서 검색, 쪽 이동, 텍스트 저장",
   "start_url": "./index-1.html",
   "scope": "./",
   "display": "standalone",

@@ -151,14 +151,15 @@ header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v41</span></h1>
+    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v46</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
+    <label class="btn" title="기본은 꺼짐입니다. 켜면 Ctrl+O 파일 열기, Ctrl+F 문서 검색, Ctrl +/−/0 문서 배율을 사용합니다. 입력칸에서는 적용하지 않습니다."><input type="checkbox" id="viewerShortcuts"> 뷰어 단축키</label>
     <span class="fname" id="fname"></span>
     <span class="spacer"></span>
     <span class="zoombox" id="zoombox">
-      <button class="btn" id="zOut" title="Ctrl −">−</button>
+      <button class="btn" id="zOut" title="문서 축소" aria-label="문서 축소">−</button>
       <select id="zoomSel" class="btn" title="배율 선택" style="min-width:86px">
         <option value="fitw">폭맞춤</option>
         <option value="fitp">쪽맞춤</option>
@@ -169,7 +170,7 @@ header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
         <option value="2">200%</option>
         <option value="custom" hidden></option>
       </select>
-      <button class="btn" id="zIn" title="Ctrl +">＋</button>
+      <button class="btn" id="zIn" title="문서 확대" aria-label="문서 확대">＋</button>
     </span>
     <button class="btn" id="btnCompat" style="display:none">호환 모드</button>
     <button class="btn primary" id="btnPdf" style="display:none">PDF 저장</button>
@@ -183,8 +184,8 @@ header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
   </div>
 
   <nav id="docTools" aria-label="문서 도구" hidden>
-    <div class="toolGroup"><button class="btn" id="pagePrev" aria-label="이전 쪽">‹</button><input id="pageNumber" type="number" min="1" value="1" aria-label="이동할 쪽"><span id="pageTotal"></span><button class="btn" id="pageNext" aria-label="다음 쪽">›</button></div>
-    <div class="toolGroup"><input id="searchText" type="search" placeholder="문서에서 찾기" aria-label="문서 검색"><button class="btn" id="searchPrev" aria-label="이전 검색 결과">↑</button><button class="btn" id="searchNext" aria-label="다음 검색 결과">↓</button><span id="searchCount" role="status"></span></div>
+    <div class="toolGroup"><button class="btn" id="pagePrev" aria-label="이전 쪽">‹</button><input id="pageNumber" type="number" min="1" value="1" aria-label="이동할 쪽"><button class="btn" id="pageGo">이동</button><span id="pageTotal"></span><button class="btn" id="pageNext" aria-label="다음 쪽">›</button></div>
+    <div class="toolGroup"><input id="searchText" type="search" placeholder="문서에서 찾기" aria-label="문서 검색"><button class="btn" id="searchRun">찾기</button><button class="btn" id="searchPrev" aria-label="이전 검색 결과">↑</button><button class="btn" id="searchNext" aria-label="다음 검색 결과">↓</button><span id="searchCount" role="status"></span></div>
     <button class="btn" id="saveText">텍스트 저장</button>
   </nav>
   <div id="hxScroll"><div id="hxZoom"><div class="hx-page" id="hxPage"></div></div></div>
@@ -202,7 +203,7 @@ header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
     <span id="errguide"></span>
   </div>
 
-  <footer id="appStatus" role="status">파일을 선택하면 읽기를 시작합니다 · Ctrl+O 파일 열기</footer>
+  <footer id="appStatus" role="status">파일 열기 버튼으로 시작하세요 · 뷰어 단축키 꺼짐</footer>
   <input type="file" id="fileInput" accept=".hwp,.hwpx,.ttf,.otf,.ttc" multiple>
 
 <script id="hxBundle">
@@ -1251,7 +1252,7 @@ cfb/cfb.js:
         }
         if (id === CT.TBL) {
           var tbl = { type: 'table', rows: 0, cols: 0, cells: [], caption: [],
-            width: common.w, inline: common.inline, flow: common.flow, halign: common.halign };
+            width: common.w, height: common.h, inline: common.inline, flow: common.flow, halign: common.halign };
           while (pos < rs.length && rs[pos].level > level) {
             var c = rs[pos];
             if (c.tag === T.TABLE) {
@@ -1420,7 +1421,7 @@ cfb/cfb.js:
   var PT2PX = 96 / 72;
 
   // 원본 줄 분해(LINE_SEG) 재현 — 줄 높이·분절·들여를 파일 값 그대로
-  function renderParaSeg(para, ctx, flowState, pager) {
+  function renderParaSeg(para, ctx, flowState, pager, trimCellTail) {
     var ps = ctx.info.paraShapes[para.shapeId];
     var align = ps ? (['justify', 'left', 'right', 'center', 'justify', 'justify'][ps.align] || 'justify') : 'justify';
     var mkDiv = function () {
@@ -1460,7 +1461,10 @@ cfb/cfb.js:
     var openLine = function () {
       line = ctx.doc.createElement('div');
       var s = para.segs[segIdx];
-      line.style.height = (s.box * PT2PX) + 'px';          // 줄박스 = 파일 값 고정
+      if (pager) div.dataset.sourceEnd = String(s.y + s.h);
+      // A cell's final line has no following line: its trailing interline gap is not cell content.
+      var lineBox = trimCellTail && segIdx === para.segs.length - 1 ? s.h : s.box;
+      line.style.height = (lineBox * PT2PX) + 'px';
       line.style.lineHeight = (s.h * PT2PX) + 'px';        // 텍스트는 상단 h 영역
       // overflow 봉인 제거: height 고정으로 충분, hidden은 디센더를 절단해 '중간 라인' 유발
                        // 폰트박스가 밀어올리지 못하게 봉인
@@ -1550,6 +1554,27 @@ cfb/cfb.js:
     div.className = 'hx-p';
     var ps = ctx.info.paraShapes[para.shapeId];
     applyPara(div, ps);
+    // A paragraph containing only block objects and whitespace must not create
+    // anonymous text lines before/after a table. Keep its source line-box minimum
+    // without hiding or shrinking overflowing content.
+    var objectOnly = para.blocks.length > 0 && para.blocks.every(function(b){return b.type === 'table';}) &&
+      !para.chars.some(function(ch){return typeof ch === 'string' && ch.trim();});
+    if (objectOnly) {
+      div.style.lineHeight = 'normal';
+      div.style.marginTop = '0'; div.style.marginBottom = '0';
+      div.style.textIndent = '0';
+      div.style.minHeight = '0';
+      para.blocks.forEach(function(block){
+        var node = renderBlock(block, ctx);
+        if (block.inline || block.flow === 1) node.style.margin = '0';
+        div.appendChild(node);
+      });
+      if (para.segs.length === 1 && para.blocks.every(function(b){return b.inline || b.flow === 1;})) {
+        div.style.minHeight = (para.segs[0].box * PT2PX) + 'px';
+        div.dataset.sourceLineHeight = String(para.segs[0].box * PT2PX);
+      }
+      return div;
+    }
     var runs = para.runs.length ? para.runs : [[0, 0]];
     var marker = headMarker(ps, ctx);
     if (marker) {
@@ -1686,8 +1711,8 @@ cfb/cfb.js:
           }
           cellBorder(td, ctx.info.borderFills[c.borderFillId]);
           var cfs = { prevEnd: null };
-          c.paras.forEach(function (p) {
-            if (canSeg(p)) td.appendChild(renderParaSeg(p, ctx, cfs));
+          c.paras.forEach(function (p, paragraphIndex) {
+            if (canSeg(p)) td.appendChild(renderParaSeg(p, ctx, cfs, null, paragraphIndex === c.paras.length - 1));
             else { cfs.prevEnd = null; td.appendChild(renderPara(p, ctx)); }
           });
           if (!td.childNodes.length) td.innerHTML = '&nbsp;';
@@ -1868,6 +1893,9 @@ cfb/cfb.js:
             var lastS = p.segs[p.segs.length - 1];
             el.dataset.fy0 = p.segs[0].y.toFixed(2);       // 부착 후 실높이 보정용
             el.dataset.fend = (lastS.y + lastS.box).toFixed(2);
+            // Only a single, in-flow table anchor has an unambiguous page-local extent.
+            if (el.dataset.sourceLineHeight && p.segs.length === 1)
+              el.dataset.sourceEnd = String(lastS.y + lastS.h);
             pageDiv.appendChild(el);
             flowState.prevEnd = lastS.y + lastS.box;
             pager.mark(lastS.y + lastS.box);
@@ -1969,42 +1997,99 @@ cfb/cfb.js:
     syncZoomSel(); saveZoom();
   }
   var userFonts = [];
+  // Browser shortcuts belong to the browser unless explicitly enabled here.
+  function shortcutAllowed(e) {
+    var toggle = $('viewerShortcuts');
+    if (!toggle || !toggle.checked || e.defaultPrevented || e.isComposing) return false;
+    var target = e.target;
+    return !(target && (target.isContentEditable || (target.closest &&
+      target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])'))));
+  }
+  window.hxShortcutAllowed = shortcutAllowed;
+  $('viewerShortcuts').addEventListener('change', function () {
+    $('appStatus').textContent = this.checked
+      ? '뷰어 단축키 켜짐 · Ctrl+O 열기 · Ctrl+F 검색 · Ctrl +/−/0 배율 · 입력칸 제외'
+      : '뷰어 단축키 꺼짐 · 파일 열기·검색·쪽 이동·배율은 화면 버튼으로 조작하세요';
+  });
   var busy = false;
   var loadGeneration = 0, activeWorker = null, workerURL = null, loadTimer = null;
   function stopWorker() { if(activeWorker) activeWorker.terminate();activeWorker=null;if(workerURL) URL.revokeObjectURL(workerURL);workerURL=null;clearTimeout(loadTimer); }
   function unpackInWorker(u8, kind, done) {
     var token=loadGeneration;
-    function workerMain(){
-      self.onmessage=function(event){try{
+    function workerMain(scope, lib){
+      scope.onmessage=function(event){try{
         var u8=event.data.bytes,kind=event.data.kind,limit=128*1024*1024,total=0,result;
         if(kind==='zip'){
           var count=0;
-          result=window.HWPLIB.unzipSync(u8,{filter:function(entry){
+          result=lib.unzipSync(u8,{filter:function(entry){
             if(++count>10000)throw new Error('압축 항목이 10,000개를 초과합니다.');
             if(!Number.isSafeInteger(entry.originalSize)||entry.originalSize<0||entry.originalSize>32*1024*1024)throw new Error('압축 항목이 처리 한도(32MB)를 초과합니다.');
             total+=entry.originalSize;if(total>limit)throw new Error('압축 해제 크기가 128MB를 초과합니다.');return true;
           }});
         }else{
-          var cont=window.HWPLIB.CFB.read(u8,{type:'array'}),fh=window.HWPLIB.CFB.find(cont,'FileHeader');
+          var cont=lib.CFB.read(u8,{type:'array'}),fh=lib.CFB.find(cont,'FileHeader');
           if(!fh||fh.content.length<40)throw new Error('HWP 파일 헤더가 올바르지 않습니다.');
           var flags=fh.content[36];if(flags&2)throw new Error('암호화 문서는 지원하지 않습니다.');
           var streams={};cont.FullPaths.forEach(function(path){if(!/(?:^|\/)(?:DocInfo|BodyText\/Section\d+)$/i.test(path))return;
-            var e=window.HWPLIB.CFB.find(cont,path),data=new Uint8Array(e.content);
-            if(flags&1)data=window.HWPLIB.inflateRaw(data);
+            var e=lib.CFB.find(cont,path),data=new Uint8Array(e.content);
+            if(flags&1)data=lib.inflateRaw(data);
             total+=data.byteLength;if(data.byteLength>32*1024*1024||total>limit)throw new Error('HWP 압축 해제 크기가 처리 한도를 초과합니다.');streams[path]=data;
           });result={cont:cont,streams:streams};
         }
-        self.postMessage({ok:true,result:result});
-      }catch(error){self.postMessage({ok:false,message:error.message});}};
+        // Transfer ownership instead of copying large decompressed buffers.
+        // CFB entries can share storage, so each ArrayBuffer is transferred once.
+        var buffers=new Set();
+        function keepBuffer(data){if(data&&data.buffer instanceof ArrayBuffer)buffers.add(data.buffer);}
+        if(kind==='zip')Object.keys(result).forEach(function(key){keepBuffer(result[key]);});
+        else {
+          Object.keys(result.streams).forEach(function(key){keepBuffer(result.streams[key]);});
+          result.cont.FileIndex.forEach(function(entry){
+            // CFB may attach parser functions to ordinary byte arrays; those
+            // functions cannot cross the worker boundary. Send plain bytes.
+            if(entry.content&&!ArrayBuffer.isView(entry.content))entry.content=new Uint8Array(entry.content);
+            keepBuffer(entry.content);
+          });
+        }
+        scope.postMessage({ok:true,result:result},Array.from(buffers));
+      }catch(error){scope.postMessage({ok:false,message:error.message,name:error.name});}};
+    }
+    var fallbackStarted=false;
+    function readLocally(reason){
+      if(token!==loadGeneration||fallbackStarted)return;
+      fallbackStarted=true;stopWorker();
+      setLoading(true,'호환 방식으로 문서를 읽는 중…');
+      // Keep the same parser and limits. No upload or browser setting change.
+      loadTimer=setTimeout(function(){
+        loadTimer=null;if(token!==loadGeneration)return;
+        var scope={postMessage:function(message){
+          if(token!==loadGeneration)return;
+          if(!message.ok)return fail('문서 해석 실패',message.message);
+          done(message.result);
+        }};
+        try {workerMain(scope,window.HWPLIB);scope.onmessage({data:{bytes:u8,kind:kind}});}
+        catch(error){fail('문서 처리 실패',error.message);}
+      },30);
     }
     try {
-      workerURL=URL.createObjectURL(new Blob(['var window=self;\n',document.getElementById('hxBundle').textContent,'\n(',workerMain.toString(),')();'],{type:'text/javascript'}));
+      workerURL=URL.createObjectURL(new Blob(['var window=self;\n',document.getElementById('hxBundle').textContent,'\n(',workerMain.toString(),')(self,window.HWPLIB);'],{type:'text/javascript'}));
       activeWorker=new Worker(workerURL);
-      activeWorker.onmessage=function(event){if(token!==loadGeneration)return;stopWorker();if(!event.data.ok)return fail('문서 준비 실패',event.data.message);done(event.data.result);};
-      activeWorker.onerror=function(){if(token!==loadGeneration)return;stopWorker();fail('문서 준비 실패','브라우저에서 작업 실행을 허용하지 않거나 파일을 처리할 수 없습니다.');};
+      activeWorker.onmessage=function(event){
+        if(token!==loadGeneration||fallbackStarted)return;
+        stopWorker();
+        if(!event.data.ok){
+          if(event.data.name==='DataCloneError')return readLocally(event.data.message);
+          return fail('문서 해석 실패',event.data.message);
+        }
+        done(event.data.result);
+      };
+      activeWorker.onerror=function(event){
+        if(event&&event.preventDefault)event.preventDefault();
+        readLocally('Worker 실행 실패');
+      };
       loadTimer=setTimeout(function(){if(token!==loadGeneration)return;stopWorker();fail('처리 시간이 초과되었습니다.','문서를 나누거나 작은 파일로 다시 시도하세요.');},30000);
+      // Retain input bytes for recovery if worker startup fails asynchronously.
       activeWorker.postMessage({bytes:u8,kind:kind});
-    }catch(error){stopWorker();fail('문서 준비 기능을 시작할 수 없습니다.',error.message);}
+    }catch(error){readLocally(error.message);}
   }
 
   window.addEventListener('error', function (ev) {
@@ -2340,10 +2425,48 @@ cfb/cfb.js:
     }
   }
 
+  // Preserve only fully described, monotonic page-local source layouts. Missing
+  // coordinates, floating objects and truly overlong tables keep the flow fallback.
+  function alignSourcePages(root, contentHpx) {
+    root.querySelectorAll('.hx-pagecard').forEach(function (card) {
+      var units = Array.from(card.children), previousEnd = -1;
+      var valid = units.length > 0 && units.every(function (unit) {
+        var raw = unit.dataset.y0 !== undefined ? unit.dataset.y0 : unit.dataset.fy0;
+        var top = Number(raw), end = Number(unit.dataset.sourceEnd);
+        if (raw === undefined || unit.dataset.sourceEnd === undefined ||
+            !Number.isFinite(top) || !Number.isFinite(end) || top < 0 ||
+            end < top || top + 0.5 < previousEnd || end * (96 / 72) > contentHpx + 1)
+          return false;
+        previousEnd = end;
+        return true;
+      });
+      if (!valid) { delete card.dataset.sourcePage; return; }
+      card.dataset.sourcePage = '1';
+      // Reconcile every unit, including table -> table. Never add the table
+      // height and its source anchor height twice, and never overlap content.
+      units.forEach(function (unit) {
+        unit.style.marginTop = '0';
+        unit.style.marginBottom = '0';
+        unit.style.display = 'flow-root';
+      });
+      // Complete style writes before measuring. Margins do not affect the
+      // flow-root's own height, so positioning needs no further layout reads.
+      var heights = units.map(function (unit) { return unit.getBoundingClientRect().height; });
+      var used = 0;
+      units.forEach(function (unit, index) {
+        var raw = unit.dataset.y0 !== undefined ? unit.dataset.y0 : unit.dataset.fy0;
+        var gap = Math.max(0, Number(raw) * (96 / 72) - used);
+        unit.style.marginTop = gap + 'px';
+        used += gap + heights[index];
+      });
+    });
+  }
+
   // 개체 높이가 앵커줄에 미포함인 저장기 호환: 부착 후 실측으로 표 직후 간격 재계산
   function reflowFlowGaps(root) {
     var PT = 96 / 72;
     root.querySelectorAll('.hx-pagecard').forEach(function (card) {
+      if (card.dataset.sourcePage === '1') return;
       var prevFlow = null;
       Array.prototype.forEach.call(card.children, function (u) {
         if (u.dataset && u.dataset.fy0) { prevFlow = u; return; }
@@ -2399,6 +2522,7 @@ cfb/cfb.js:
     };
     for (var ci = 0; ci < cards.length; ci++) {
       var card = cards[ci];
+      if (card.dataset.sourcePage === '1') continue;
       // 카드 높이는 A4 최소높이에 가려지므로 '자식 높이 합'으로 실제 내용량을 잰다
       var sumH = 0;
       for (var sm = 0; sm < card.children.length; sm++) {
@@ -2686,6 +2810,7 @@ cfb/cfb.js:
       for (var gk = 0; gk < tdG.children.length; gk++) inner += tdG.children[gk].offsetHeight;
       if (decl - inner > contentHguard) tdG.style.height = '';
     }
+    alignSourcePages(root, contentHguard);
     reflowFlowGaps(root);
     repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
     var cards3 = root.querySelectorAll('.hx-pagecard');
@@ -2701,6 +2826,7 @@ cfb/cfb.js:
     var contentHn = (pi.h - pi.mt - pi.mb) * info.U2PX;
     for (var ni = 0; ni < cardsN.length; ni++) {
       var cN = cardsN[ni];
+      if (cN.dataset.sourcePage === '1') continue;
       var sumN = 0;
       for (var qk = 0; qk < cN.children.length; qk++) {
         var chQ = cN.children[qk];
@@ -3149,7 +3275,7 @@ cfb/cfb.js:
     applyZoomMode();
   });
   hxScroll.addEventListener('wheel', function (e) {           // Ctrl+휠 = 배율
-    if (!e.ctrlKey) return;
+    if (!shortcutAllowed(e) || !e.ctrlKey) return;
     e.preventDefault();
     zoomMode = 'pct'; fitMode = false;
     setZoom(zoom * (e.deltaY < 0 ? 1.06 : 1 / 1.06));
@@ -3158,7 +3284,7 @@ cfb/cfb.js:
   // 진단용 숨은 기능: Ctrl+Alt+D — 문단·표 경계와 좌표를 겹쳐 표시
   var dbgOn = false;
   window.addEventListener('keydown', function (e) {
-    if (!(e.ctrlKey && e.altKey && (e.key === 'd' || e.key === 'D'))) return;
+    if (!shortcutAllowed(e) || !(e.ctrlKey && e.altKey && (e.key === 'd' || e.key === 'D'))) return;
     e.preventDefault();
     dbgOn = !dbgOn;
     var old = hxPage.querySelectorAll('.hx-dbg');
@@ -3204,7 +3330,7 @@ cfb/cfb.js:
   });
 
   window.addEventListener('keydown', function (e) {           // Ctrl +/−/0
-    if (!e.ctrlKey || hxScroll.style.display !== 'block') return;
+    if (!shortcutAllowed(e) || !e.ctrlKey || e.altKey || hxScroll.style.display !== 'block') return;
     if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomMode = 'pct'; fitMode = false; setZoom(zoom + 0.1); saveZoom(); }
     else if (e.key === '-') { e.preventDefault(); zoomMode = 'pct'; fitMode = false; setZoom(zoom - 0.1); saveZoom(); }
     else if (e.key === '0') { e.preventDefault(); zoomMode = 'fitw'; applyZoomMode(); }
@@ -3233,32 +3359,54 @@ cfb/cfb.js:
 (function(){
 'use strict';
 const $=id=>document.getElementById(id),root=$('hxPage'),pane=$('hxScroll');
-let cards=[],index=[],hits=[],selected=-1,current=0,timer,frame,generation=0,composing=false;
+let cards=[],index=null,hits=[],selected=-1,current=0,timer,frame=null,generation=0,composing=false;
 const supported=!!(window.CSS&&CSS.highlights&&window.Highlight);
 function clearHighlights(){if(supported){CSS.highlights.delete('hxSearch');CSS.highlights.delete('hxCurrent');}else{const sel=window.getSelection();if(sel&&root.contains(sel.anchorNode))sel.removeAllRanges();}}
 function setHighlights(){if(!supported)return;const h=new Highlight();hits.forEach(r=>h.add(r));CSS.highlights.set('hxSearch',h);if(selected>=0)CSS.highlights.set('hxCurrent',new Highlight(hits[selected]));}
-function clear(){generation++;clearTimeout(timer);timer=null;cards=[];index=[];hits=[];selected=-1;current=0;clearHighlights();$('docTools').hidden=true;$('searchText').value='';$('searchCount').textContent='';$('appStatus').textContent='파일을 선택하면 읽기를 시작합니다 · Ctrl+O 파일 열기';}
+function clear(){generation++;clearTimeout(timer);timer=null;cancelAnimationFrame(frame);frame=null;cards=[];index=null;hits=[];selected=-1;current=0;clearHighlights();$('docTools').hidden=true;$('searchText').value='';$('searchCount').textContent='';$('appStatus').textContent='파일 열기 버튼으로 시작하세요';}
 function updatePage(){if(!cards.length)return;const top=pane.getBoundingClientRect().top+28;let lo=0,hi=cards.length-1;while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(cards[mid].getBoundingClientRect().top<=top)lo=mid;else hi=mid-1;}current=lo;if(document.activeElement!==$('pageNumber'))$('pageNumber').value=current+1;$('pagePrev').disabled=current===0;$('pageNext').disabled=current===cards.length-1;}
 function go(n){if(!cards.length)return;n=Number(n);n=Number.isFinite(n)?Math.trunc(n):current+1;n=Math.max(1,Math.min(cards.length,n));$('pageNumber').value=n;pane.scrollTop+=cards[n-1].getBoundingClientRect().top-pane.getBoundingClientRect().top-28;updatePage();}
-function fold(text){let lower='',starts=[],ends=[],offset=0;for(const char of text){const f=char.toLowerCase();for(let i=0;i<f.length;i++){starts.push(offset);ends.push(offset+char.length);}lower+=f;offset+=char.length;}return {lower,starts,ends};}
-function buildIndex(){index=[];const blocks=Array.from(root.querySelectorAll('.hx-seg,p,.hx-p,td,th')).filter(e=>!e.closest('.hx-runhead,.hx-runfoot,.hx-dbg')&&!e.querySelector('.hx-seg,p,.hx-p,td,th'));for(const block of blocks){const walker=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);let nodes=[],text='',node;while((node=walker.nextNode())){nodes.push({node,start:text.length});text+=node.nodeValue;}if(text)index.push({nodes,...fold(text)});}}
-function ready(){cards=Array.from(root.querySelectorAll('.hx-pagecard'));buildIndex();$('docTools').hidden=!cards.length;$('pageNumber').max=cards.length;$('pageTotal').textContent='/ '+cards.length+'쪽';$('appStatus').textContent=cards.length+'쪽 · 문서 자동 저장 없음 · Ctrl+F 검색';updatePage();}
+// Most documents preserve UTF-16 offsets when lowercased. Allocate an offset
+// map only for expanding characters such as İ; surrogate pairs remain intact.
+function fold(text){
+ let lower='',expanded=false;
+ for(const char of text){const f=char.toLowerCase();lower+=f;if(f.length!==char.length)expanded=true;}
+ if(!expanded)return {lower,starts:null,ends:null};
+ const starts=new Uint32Array(lower.length),ends=new Uint32Array(lower.length);
+ let offset=0,at=0;
+ for(const char of text){const f=char.toLowerCase();for(let i=0;i<f.length;i++){starts[at]=offset;ends[at++]=offset+char.length;}offset+=char.length;}
+ return {lower,starts,ends};
+}
+async function buildIndex(token){
+ const result=[],blocks=root.querySelectorAll('.hx-seg,p,.hx-p,td,th');
+ for(let i=0;i<blocks.length;i++){
+  const block=blocks[i];
+  if(!block.closest('.hx-runhead,.hx-runfoot,.hx-dbg')&&!block.querySelector('.hx-seg,p,.hx-p,td,th')){
+   const walker=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);let nodes=[],text='',node;
+   while((node=walker.nextNode())){nodes.push({node,start:text.length});text+=node.nodeValue;}
+   if(text)result.push({nodes,...fold(text)});
+  }
+  if(i%100===99){await new Promise(resolve=>setTimeout(resolve,0));if(token!==generation)return null;}
+ }
+ return token===generation?result:null;
+}
+function ready(){generation++;index=null;cards=Array.from(root.querySelectorAll('.hx-pagecard'));$('docTools').hidden=!cards.length;$('pageNumber').max=cards.length;$('pageTotal').textContent='/ '+cards.length+'쪽';$('appStatus').textContent=cards.length+'쪽 · 문서 자동 저장 없음 · 위의 검색창과 버튼을 사용하세요';updatePage();}
 function nodeAt(nodes,pos,end){let lo=0,hi=nodes.length-1;while(lo<hi){const m=Math.ceil((lo+hi)/2);if(nodes[m].start<(end?pos:pos+1))lo=m;else hi=m-1;}return nodes[lo];}
 function move(delta){if(!hits.length)return;selected=(selected+delta+hits.length)%hits.length;const range=hits[selected];if(supported)CSS.highlights.set('hxCurrent',new Highlight(range));else{const sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);}const r=range.getBoundingClientRect(),p=pane.getBoundingClientRect();pane.scrollTop+=r.top-p.top-pane.clientHeight/3;if(r.left<p.left||r.right>p.right)pane.scrollLeft+=r.left-p.left-pane.clientWidth/3;$('searchCount').textContent=(selected+1)+' / '+hits.length+(hits.length===10000?' (상한)':'');updatePage();}
-async function search(){const token=++generation;clearHighlights();hits=[];selected=-1;const q=$('searchText').value.toLowerCase();if(!q){$('searchCount').textContent='';return;}$('searchCount').textContent='찾는 중…';const found=[];
-for(let i=0;i<index.length;i++){const block=index[i];let at=0;while((at=block.lower.indexOf(q,at))!==-1){const start=block.starts[at],end=block.ends[at+q.length-1],first=nodeAt(block.nodes,start,false),last=nodeAt(block.nodes,end,true);const r=document.createRange();r.setStart(first.node,start-first.start);r.setEnd(last.node,end-last.start);found.push(r);at+=q.length;if(found.length===10000)break;}if(found.length===10000)break;if(i%100===99){await new Promise(r=>setTimeout(r,0));if(token!==generation)return;}}
+async function search(){const token=++generation;clearHighlights();hits=[];selected=-1;const q=$('searchText').value.toLowerCase();if(!q){$('searchCount').textContent='';return;}$('searchCount').textContent='찾는 중…';if(index===null){const built=await buildIndex(token);if(token!==generation||built===null)return;index=built;}const found=[];
+for(let i=0;i<index.length;i++){const block=index[i];let at=0;while((at=block.lower.indexOf(q,at))!==-1){const start=block.starts?block.starts[at]:at,end=block.ends?block.ends[at+q.length-1]:at+q.length,first=nodeAt(block.nodes,start,false),last=nodeAt(block.nodes,end,true);const r=document.createRange();r.setStart(first.node,start-first.start);r.setEnd(last.node,end-last.start);found.push(r);at+=q.length;if(found.length===10000)break;}if(found.length===10000)break;if(i%100===99){await new Promise(r=>setTimeout(r,0));if(token!==generation)return;}}
 if(token!==generation)return;hits=found;setHighlights();$('searchCount').textContent=hits.length?'':'결과 없음';if(hits.length)move(1);
 }
 window.hxReaderTools={clear,ready};
-$('pagePrev').onclick=()=>go(current);$('pageNext').onclick=()=>go(current+2);$('pageNumber').onchange=()=>go($('pageNumber').value);
-pane.addEventListener('scroll',()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(updatePage);},{passive:true});
+$('pageGo').onclick=()=>go($('pageNumber').value);$('pagePrev').onclick=()=>go(current);$('pageNext').onclick=()=>go(current+2);$('pageNumber').onchange=()=>go($('pageNumber').value);
+pane.addEventListener('scroll',()=>{if(frame!==null)return;frame=requestAnimationFrame(()=>{frame=null;updatePage();});},{passive:true});
 function schedule(){generation++;clearTimeout(timer);timer=setTimeout(()=>{timer=null;search();},180);}
 $('searchText').oncompositionstart=()=>{composing=true;generation++;clearTimeout(timer);timer=null;};$('searchText').oncompositionend=()=>{composing=false;schedule();};$('searchText').oninput=()=>{if(!composing)schedule();};
 $('searchText').onkeydown=e=>{if(e.isComposing||composing)return;if(e.key==='Enter'){e.preventDefault();if(timer){clearTimeout(timer);timer=null;search();}else move(e.shiftKey?-1:1);}if(e.key==='Escape'){clearTimeout(timer);timer=null;$('searchText').value='';search();$('searchText').blur();}};
-$('searchPrev').onclick=()=>move(-1);$('searchNext').onclick=()=>move(1);
+$('searchRun').onclick=()=>{clearTimeout(timer);timer=null;search();};$('searchPrev').onclick=()=>move(-1);$('searchNext').onclick=()=>move(1);
 $('saveText').onclick=()=>{const text=window.hxExtractText(root),u=URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=u;a.download=(document.title||'document')+'.txt';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);$('appStatus').textContent='텍스트 다운로드를 요청했습니다. 반복 머리말·꼬리말과 도형 배치는 제외됩니다.';};
 $('drop').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click();}};
-window.addEventListener('keydown',e=>{if(!(e.ctrlKey||e.metaKey))return;if(e.key.toLowerCase()==='o'){e.preventDefault();$('fileInput').click();}if(e.key.toLowerCase()==='f'&&cards.length){e.preventDefault();$('searchText').focus();$('searchText').select();}});
+window.addEventListener('keydown',e=>{if(!window.hxShortcutAllowed(e)||!(e.ctrlKey||e.metaKey)||e.altKey||e.shiftKey)return;if(e.key.toLowerCase()==='o'){e.preventDefault();$('fileInput').click();}if(e.key.toLowerCase()==='f'&&cards.length){e.preventDefault();$('searchText').focus();$('searchText').select();}});
 window.addEventListener('beforeprint',clearHighlights);window.addEventListener('afterprint',setHighlights);
 })();
 </script>
