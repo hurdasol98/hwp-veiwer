@@ -151,7 +151,7 @@ header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v50</span></h1>
+    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v51</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -290,6 +290,77 @@ cfb/cfb.js:
 
 </script>
 <script>
+/* Distribution HWPX: fixed format key, not a user password.
+ * Format research: https://groups.google.com/g/hwp-foss/c/lOr89cyqBXE
+ * Verified against the supplied file: SHA-256-1k is over inflated plaintext.
+ */
+window.HWPXDistribution = (function () {
+  'use strict';
+  var NS = 'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0';
+  function xml(bytes, name) {
+    var doc = new DOMParser().parseFromString(new TextDecoder().decode(bytes), 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error(name + ' XML이 올바르지 않습니다.');
+    return doc;
+  }
+  function attr(node, name) { return node.getAttribute(name) || node.getAttributeNS(NS, name) || ''; }
+  function child(node, name) { return Array.from(node.children).find(function (n) { return n.localName === name; }); }
+  function b64(value) {
+    try { return Uint8Array.from(atob(value), function (c) { return c.charCodeAt(0); }); }
+    catch (_) { throw new Error('암호화 메타데이터의 Base64 값이 올바르지 않습니다.'); }
+  }
+  async function prepare(files) {
+    var manifestPath = Object.keys(files).find(function (p) { return /^META-INF\/manifest\.xml$/i.test(p); });
+    if (!manifestPath) return { files: files, distribution: false };
+    var manifest = xml(files[manifestPath], 'manifest.xml');
+    var entries = Array.from(manifest.getElementsByTagNameNS('*', 'file-entry')).filter(function (e) { return child(e, 'encryption-data'); });
+    if (!entries.length) return { files: files, distribution: false };
+    var packagePath = Object.keys(files).find(function (p) { return /^Contents\/content\.hpf$/i.test(p); });
+    var pkg = packagePath && xml(files[packagePath], 'content.hpf').documentElement;
+    var distribution = pkg && Array.from(pkg.attributes).some(function (a) { return a.localName === 'distribution' && a.value === '1'; });
+    if (!distribution) throw new Error('열기 암호가 설정된 HWPX입니다. 현재는 일반 문서와 배포용 문서를 지원합니다.');
+    if (!window.crypto || !window.crypto.subtle) throw new Error('이 실행 환경에서는 암호화 처리를 사용할 수 없습니다. 파일을 Edge/Chrome에서 직접 열거나 HTTPS·localhost에서 실행하세요.');
+    var subtle = window.crypto.subtle, total = 0, seen = new Set();
+    // Validate all metadata and output budgets before allocating/decrypting.
+    var specs = entries.map(function (entry) {
+      var path = attr(entry, 'full-path'), size = Number(attr(entry, 'size'));
+      var enc = child(entry, 'encryption-data'), alg = child(enc, 'algorithm'), kd = child(enc, 'key-derivation'), sk = child(enc, 'start-key-generation');
+      if (!path || !Object.prototype.hasOwnProperty.call(files, path) || seen.has(path)) throw new Error('암호화 대상 항목이 없거나 중복되었습니다.');
+      seen.add(path);
+      if (!attr(entry, 'size') || !Number.isSafeInteger(size) || size < 0 || size > 32*1024*1024 || (total += size) > 128*1024*1024) throw new Error('복호화 문서 크기가 처리 한도를 초과합니다.');
+      if (!alg || !kd || !sk || attr(alg, 'algorithm-name') !== 'http://www.w3.org/2001/04/xmlenc#aes256-cbc' ||
+          attr(kd, 'key-derivation-name') !== NS+'#pbkdf2' || attr(kd, 'key-size') !== '32' ||
+          attr(sk, 'start-key-generation-name') !== 'http://www.w3.org/2000/09/xmldsig#sha256' || attr(sk, 'key-size') !== '32' ||
+          attr(enc, 'checksum-type') !== NS+'#sha256-1k') throw new Error('지원하지 않는 배포용 HWPX 암호화 방식입니다.');
+      var iterations = Number(attr(kd, 'iteration-count')), iv = b64(attr(alg, 'initialisation-vector')), salt = b64(attr(kd, 'salt')), checksum = b64(attr(enc, 'checksum'));
+      if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > 1000000 || iv.length !== 16 || salt.length < 1 || salt.length > 1024 || checksum.length !== 32 || !files[path].length || files[path].length % 16) throw new Error('배포용 HWPX 암호화 정보가 올바르지 않습니다.');
+      return {path:path,size:size,iterations:iterations,iv:iv,salt:salt,checksum:checksum};
+    });
+    var start = await subtle.digest('SHA-256', new TextEncoder().encode('"Yang WangSunv!!"'));
+    var material = await subtle.importKey('raw', start, 'PBKDF2', false, ['deriveKey']);
+    var result = Object.assign(Object.create(null), files);
+    for (var spec of specs) {
+      var key = await subtle.deriveKey({name:'PBKDF2',salt:spec.salt,iterations:spec.iterations,hash:'SHA-1'}, material, {name:'AES-CBC',length:256}, false, ['encrypt','decrypt']);
+      var ciphertext = files[spec.path];
+      // WebCrypto removes PKCS#7 padding, but HWPX has zero padding. Append a
+      // valid synthetic padding block chained from the last ciphertext block.
+      // Its removal returns the original raw plaintext without guessing padding.
+      var tail = new Uint8Array(await subtle.encrypt({name:'AES-CBC',iv:ciphertext.slice(-16)}, key, new Uint8Array(0)));
+      var padded = new Uint8Array(ciphertext.length + 16);padded.set(ciphertext);padded.set(tail,ciphertext.length);
+      var compressed = new Uint8Array(await subtle.decrypt({name:'AES-CBC',iv:spec.iv},key,padded));
+      var plain;
+      try { plain = window.HWPLIB.inflateRaw(compressed, {out:new Uint8Array(spec.size + 1)}); }
+      catch (_) { throw new Error('배포용 문서를 해석하지 못했습니다: ' + spec.path); }
+      if (plain.length !== spec.size) throw new Error('복호화된 항목의 크기가 일치하지 않습니다: ' + spec.path);
+      var actual = new Uint8Array(await subtle.digest('SHA-256',plain.subarray(0,1024)));
+      if (!actual.every(function (v,i) { return v === spec.checksum[i]; })) throw new Error('문서 무결성 검사에 실패했습니다: ' + spec.path);
+      result[spec.path] = plain;
+    }
+    return {files:result,distribution:true};
+  }
+  return {prepare:prepare};
+})();
+
+
 /* HWPX (OWPML) 렌더러 — 무설치 브라우저용 */
 (function () {
   'use strict';
@@ -348,7 +419,8 @@ cfb/cfb.js:
       var u = firstByLn(cp, 'underline');
       if (u && attr(u, 'type', 'NONE') !== 'NONE') o.underline = true;
       var s = firstByLn(cp, 'strikeout');
-      if (s && attr(s, 'type', attr(s, 'shape', 'NONE')) !== 'NONE') o.strike = true;
+      // Legacy HWPX uses 3D as an inactive strikeout sentinel.
+      if (s && !/^(NONE|3D)$/i.test(attr(s, 'type', attr(s, 'shape', 'NONE')))) o.strike = true;
       var fr = firstByLn(cp, 'fontRef');
       if (fr) o.font = ctx.fonts['HANGUL:' + attr(fr, 'hangul', '0')] || null;
       if (o.font) ctx.usedFonts[o.font] = true;
@@ -3107,7 +3179,17 @@ cfb/cfb.js:
     try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit); } catch (e) {}
   }
 
-  function openHWPX(files) {
+  async function openHWPX(files) {
+    var token = loadGeneration, prepared;
+    try {
+      setLoading(true, '문서 형식을 확인하는 중…');
+      prepared = await window.HWPXDistribution.prepare(files);
+    } catch (error) {
+      if (token === loadGeneration) fail('HWPX 열기 실패', error.message);
+      return;
+    }
+    if (token !== loadGeneration) return;
+    files = prepared.files;
     var keys = Object.keys(files);
     if (!keys.some(function (k) { return /header\.xml$/i.test(k); })) {
       if (keys.some(function (k) { return /^word\//.test(k); })) return fail('이 파일은 Word 문서(docx)', '확장자만 hwp로 되어 있음 — Word에서 열어야 함');
@@ -3117,7 +3199,7 @@ cfb/cfb.js:
     }
     try {
       var info = window.HWPX.render(files, hxPage, document);
-      showPaged(info, 'HWPX');
+      showPaged(info, prepared.distribution ? 'HWPX · 배포용' : 'HWPX');
     } catch (e) {
       console.error(e);
       fail('HWPX 렌더링 실패: ' + e.message, '파일 구조가 표준과 다르거나 손상됨');
