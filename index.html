@@ -151,7 +151,7 @@ header.app h1 {font-size:18px;color:#c6ddff;margin-right:8px;}
 </head>
 <body>
   <header class="app">
-    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v51</span></h1>
+    <h1>HWP 뷰어 <span style="font-size:10px;color:#6b7484">v52</span></h1>
     <span class="badge" id="badge"></span>
     <span class="badge" id="fontBadge" style="background:#274233;color:#9fd8b0"></span>
     <button class="btn primary" id="btnOpen">파일 열기</button>
@@ -2332,6 +2332,7 @@ window.HWPXDistribution = (function () {
   function setZoom(z) {
     zoom = Math.min(3, Math.max(0.1, z));
     hxZoom.style.zoom = zoom;
+    scheduleFit();
     try { syncZoomSel(); } catch (eS) {}
   }
 
@@ -2386,6 +2387,9 @@ window.HWPXDistribution = (function () {
       // 넘침 판정은 '실제 그려진 우측 끝' 기준 (표 셀 안에서는 scrollWidth가 넘침을 반영하지 못함)
       var w = l.querySelector(':scope > .hx-fitwrap');
       var lrect = l.getBoundingClientRect();
+      // DOM rectangles include CSS zoom; client/scroll widths do not.
+      var rectScale = l.offsetWidth > 0 ? lrect.width / l.offsetWidth : 1;
+      if (!(rectScale > 0)) continue;
       var rightEdge = function (el) {
         var mx = 0;
         for (var ci = 0; ci < el.children.length; ci++) {
@@ -2396,7 +2400,7 @@ window.HWPXDistribution = (function () {
       };
       if (!w) {
         var padR = parseFloat(getComputedStyle(l).paddingRight) || 0;
-        if (rightEdge(l) <= lrect.right - padR + 1) continue;
+        if (rightEdge(l) <= lrect.right - padR * rectScale + rectScale) continue;
         w = document.createElement('span');
         w.className = 'hx-fitwrap';
         while (l.firstChild) w.appendChild(l.firstChild);
@@ -2410,6 +2414,7 @@ window.HWPXDistribution = (function () {
         l.style.overflow = 'visible';
       }
       w.style.transform = '';
+      w.style.position = ''; w.style.left = '';
       // 래퍼가 줄 안 어디에 놓였든 상관없이 '줄의 내용 폭'과 '래퍼가 필요로 하는 폭'만으로 계산한다.
       // (정렬·공백 처리 때문에 래퍼가 줄 오른쪽 밖에서 시작하는 경우가 있어 위치 기준은 신뢰할 수 없음)
       var csL = getComputedStyle(l);
@@ -2422,12 +2427,12 @@ window.HWPXDistribution = (function () {
         if (innerT > 0 && innerT < avail) avail = innerT;
       }
       var wrect0 = w.getBoundingClientRect();
-      var need = Math.max(w.scrollWidth, rightEdge(w) - wrect0.left, wrect0.width);
+      var need = Math.max(w.scrollWidth, (rightEdge(w) - wrect0.left) / rectScale, wrect0.width / rectScale);
       if (need > avail + 1 && avail > 0.5)
         w.style.transform = 'scaleX(' + Math.max(0.05, avail / need).toFixed(4) + ')';
       // 래퍼가 줄 밖으로 밀려 시작하면 왼쪽 끝으로 되돌린다 (글자가 쪽 밖으로 나가는 것 방지)
       var wr2 = w.getBoundingClientRect(), lr2 = l.getBoundingClientRect();
-      var slip = wr2.left - (lr2.left + (parseFloat(csL.paddingLeft) || 0));
+      var slip = (wr2.left - lr2.left) / rectScale - (parseFloat(csL.paddingLeft) || 0);
       if (slip > 1) {
         w.style.position = 'relative';
         w.style.left = (-slip).toFixed(2) + 'px';
