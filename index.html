@@ -859,10 +859,40 @@ cfb/cfb.js:
       /* Both renderers use the same pagination and line-fitting implementation. */
       window.HWPViewer.Layout = (function () {
         "use strict";
+        // Leading spaces express indentation, not stretchable word gaps.
+        // Keep the original text (including spaces) for selection/search/export.
+        function preserveLeadingSpaces(line) {
+          if (line.dataset.leadingSpacesFixed) return;
+          line.dataset.leadingSpacesFixed = "1";
+          if (getComputedStyle(line).textAlign !== "justify") return;
+          if (line.querySelector(':scope > span[style*="absolute"]')) return;
+          const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+          const prefixes = [];
+          let node;
+          while ((node = walker.nextNode())) {
+            if (!node.nodeValue) continue;
+            const match = node.nodeValue.match(/^ +/);
+            if (!match) break;
+            prefixes.push({ node, length: match[0].length });
+            if (match[0].length !== node.nodeValue.length) break;
+          }
+          // Collect before mutating so the walker never revisits inserted nodes.
+          for (const { node, length } of prefixes) {
+            if (length < node.length) node.splitText(length);
+            const fixed = document.createElement("span");
+            fixed.className = "hx-leading-space";
+            fixed.style.cssText =
+              "display:inline-block;white-space:pre;text-align:left;text-align-last:left;word-spacing:normal";
+            node.parentNode.insertBefore(fixed, node);
+            fixed.appendChild(node);
+          }
+        }
+
         function fitLines(root) {
           var lines = root.querySelectorAll(".hx-seg > div");
           for (var i = 0; i < lines.length; i++) {
             var l = lines[i];
+            preserveLeadingSpaces(l);
             var subs = l.querySelectorAll(':scope > span[style*="absolute"]');
             if (subs.length) {
               for (var k = 0; k < subs.length; k++) {
@@ -2870,121 +2900,129 @@ cfb/cfb.js:
           if (!sections.length) throw new Error("본문(section*.xml) 없음");
 
           var pageInfo = null;
-          sections.forEach(function (path) {
-            var sdoc = parser.parseFromString(dec(files[path]), "text/xml");
-            if (sdoc.getElementsByTagName("parsererror").length)
-              throw new Error("본문 XML 파싱 실패: " + path);
+          const rendered = docRef.createDocumentFragment();
+          try {
+            sections.forEach(function (path) {
+              var sdoc = parser.parseFromString(dec(files[path]), "text/xml");
+              if (sdoc.getElementsByTagName("parsererror").length)
+                throw new Error("본문 XML 파싱 실패: " + path);
 
-            {
-              var pg = descByLn(sdoc, "pagePr")[0];
-              if (pg) {
-                pageInfo = {
-                  w: num(pg, "width", 59528),
-                  h: num(pg, "height", 84188),
-                  ml: 8504,
-                  mr: 8504,
-                  mt: 5668,
-                  mb: 4252,
-                };
-                var mg = firstByLn(pg, "margin");
-                if (mg) {
-                  pageInfo.ml = num(mg, "left", pageInfo.ml);
-                  pageInfo.mr = num(mg, "right", pageInfo.mr);
-                  pageInfo.mt = num(mg, "top", pageInfo.mt);
-                  pageInfo.mb = num(mg, "bottom", pageInfo.mb);
-                  pageInfo.mt += num(mg, "header", 0);
-                  pageInfo.mb += num(mg, "footer", 0);
+              {
+                var pg = descByLn(sdoc, "pagePr")[0];
+                if (pg) {
+                  pageInfo = {
+                    w: num(pg, "width", 59528),
+                    h: num(pg, "height", 84188),
+                    ml: 8504,
+                    mr: 8504,
+                    mt: 5668,
+                    mb: 4252,
+                  };
+                  var mg = firstByLn(pg, "margin");
+                  if (mg) {
+                    pageInfo.ml = num(mg, "left", pageInfo.ml);
+                    pageInfo.mr = num(mg, "right", pageInfo.mr);
+                    pageInfo.mt = num(mg, "top", pageInfo.mt);
+                    pageInfo.mb = num(mg, "bottom", pageInfo.mb);
+                    pageInfo.mt += num(mg, "header", 0);
+                    pageInfo.mb += num(mg, "footer", 0);
+                  }
                 }
               }
-            }
 
-            var secDiv = docRef.createElement("div");
-            secDiv.className = "hx-section";
-            secDiv._pageInfo = Object.assign(
-              {},
-              pageInfo || { w: 59528, h: 84188, ml: 8504, mr: 8504, mt: 5668, mb: 4252 },
-            );
-            var root = sdoc.documentElement;
-            var flowState = { prevEnd: null, base: 0 };
-            var pageDiv = null;
-            var pager = {
-              lastEnd: -1,
-              cur: function () {
-                return pageDiv;
-              },
-              shouldBreak: function (y) {
-                return this.lastEnd - y > 120;
-              },
-              mark: function (end) {
-                this.lastEnd = Math.max(this.lastEnd, end);
-              },
-              page: function () {
-                pageDiv = docRef.createElement("div");
-                pageDiv.className = "hx-pagecard";
-                secDiv.appendChild(pageDiv);
-                this.lastEnd = -1;
-                flowState.prevEnd = null;
-                flowState.base = 0;
-                return pageDiv;
-              },
-            };
-            pager.page();
-            try {
-              window.__hxPageTopPx = (pageInfo ? pageInfo.mt : 5668) * U2PX;
-            } catch (eT) {}
-            childrenByLn(root, "p")
-              .reduce(function (out, p) {
-                return out.concat(splitObjectPages(p));
-              }, [])
-              .forEach(function (p) {
-                var segs = parseSegs(p),
-                  hasY = segs.length > 0;
-                var explicit = attr(p, "pageBreak", "0") === "1";
-                if (
-                  pageDiv.childNodes.length &&
-                  (explicit || (hasY && pager.shouldBreak(segs[0].y)))
-                )
-                  pager.page();
-                if (segEligible(p, segs)) {
-                  renderParagraphSeg(p, ctx, env, segs, flowState, pager);
-                } else {
-                  var el = renderParagraph(p, ctx, env);
-                  if (hasY) {
-                    var startRef = flowState.prevEnd !== null ? flowState.prevEnd : 0;
-                    var gap = segs[0].y - startRef;
-                    if (gap > 0.05 && gap < 2000) {
-                      el.style.marginTop = gap * PT2PX + "px";
-                      el.dataset.sourceGap = "1";
-                    }
-                    var last = segs[segs.length - 1];
-                    el.dataset.fy0 = String(segs[0].y);
-                    el.dataset.fend = String(last.y + last.box);
-                    if (el.dataset.sourceLineHeight && segs.length === 1)
-                      el.dataset.sourceEnd = String(last.y + last.h);
-                    flowState.prevEnd = last.y + last.box;
-                    pager.mark(flowState.prevEnd);
-                  } else flowState.prevEnd = null;
-                  pageDiv.appendChild(el);
-                }
-              });
-            if (env.notes.length) {
-              var noteBox = docRef.createElement("div");
-              noteBox.className = "hx-notes";
-              env.notes.forEach(function (n, i) {
-                var row = docRef.createElement("div");
-                row.className = "hx-note";
-                var lab = docRef.createElement("span");
-                lab.className = "hx-notelab";
-                lab.textContent = i + 1 + ") ";
-                row.appendChild(lab);
-                row.appendChild(n.el);
-                noteBox.appendChild(row);
-              });
-              secDiv.appendChild(noteBox);
-              env.notes = [];
-            }
-            container.appendChild(secDiv);
-          });
+              var secDiv = docRef.createElement("div");
+              secDiv.className = "hx-section";
+              secDiv._pageInfo = Object.assign(
+                {},
+                pageInfo || { w: 59528, h: 84188, ml: 8504, mr: 8504, mt: 5668, mb: 4252 },
+              );
+              var root = sdoc.documentElement;
+              var flowState = { prevEnd: null, base: 0 };
+              var pageDiv = null;
+              var pager = {
+                lastEnd: -1,
+                cur: function () {
+                  return pageDiv;
+                },
+                shouldBreak: function (y) {
+                  return this.lastEnd - y > 120;
+                },
+                mark: function (end) {
+                  this.lastEnd = Math.max(this.lastEnd, end);
+                },
+                page: function () {
+                  pageDiv = docRef.createElement("div");
+                  pageDiv.className = "hx-pagecard";
+                  secDiv.appendChild(pageDiv);
+                  this.lastEnd = -1;
+                  flowState.prevEnd = null;
+                  flowState.base = 0;
+                  return pageDiv;
+                },
+              };
+              pager.page();
+              try {
+                window.__hxPageTopPx = (pageInfo ? pageInfo.mt : 5668) * U2PX;
+              } catch (eT) {}
+              childrenByLn(root, "p")
+                .reduce(function (out, p) {
+                  return out.concat(splitObjectPages(p));
+                }, [])
+                .forEach(function (p) {
+                  var segs = parseSegs(p),
+                    hasY = segs.length > 0;
+                  var explicit = attr(p, "pageBreak", "0") === "1";
+                  if (
+                    pageDiv.childNodes.length &&
+                    (explicit || (hasY && pager.shouldBreak(segs[0].y)))
+                  )
+                    pager.page();
+                  if (segEligible(p, segs)) {
+                    renderParagraphSeg(p, ctx, env, segs, flowState, pager);
+                  } else {
+                    var el = renderParagraph(p, ctx, env);
+                    if (hasY) {
+                      var startRef = flowState.prevEnd !== null ? flowState.prevEnd : 0;
+                      var gap = segs[0].y - startRef;
+                      if (gap > 0.05 && gap < 2000) {
+                        el.style.marginTop = gap * PT2PX + "px";
+                        el.dataset.sourceGap = "1";
+                      }
+                      var last = segs[segs.length - 1];
+                      el.dataset.fy0 = String(segs[0].y);
+                      el.dataset.fend = String(last.y + last.box);
+                      if (el.dataset.sourceLineHeight && segs.length === 1)
+                        el.dataset.sourceEnd = String(last.y + last.h);
+                      flowState.prevEnd = last.y + last.box;
+                      pager.mark(flowState.prevEnd);
+                    } else flowState.prevEnd = null;
+                    pageDiv.appendChild(el);
+                  }
+                });
+              if (env.notes.length) {
+                var noteBox = docRef.createElement("div");
+                noteBox.className = "hx-notes";
+                env.notes.forEach(function (n, i) {
+                  var row = docRef.createElement("div");
+                  row.className = "hx-note";
+                  var lab = docRef.createElement("span");
+                  lab.className = "hx-notelab";
+                  lab.textContent = i + 1 + ") ";
+                  row.appendChild(lab);
+                  row.appendChild(n.el);
+                  noteBox.appendChild(row);
+                });
+                secDiv.appendChild(noteBox);
+                env.notes = [];
+              }
+              rendered.appendChild(secDiv);
+            });
+          } catch (error) {
+            // Ownership transfers to the controller only after a complete render.
+            env.urls.forEach((url) => URL.revokeObjectURL(url));
+            throw error;
+          }
+          container.appendChild(rendered);
 
           return {
             fonts: Object.keys(ctx.usedFonts),
@@ -4552,6 +4590,7 @@ cfb/cfb.js:
             ? "뷰어 단축키 켜짐 · Ctrl+O 열기 · Ctrl+F 검색 · Ctrl +/−/0 배율 · 입력칸 제외"
             : "뷰어 단축키 꺼짐 · 파일 열기·검색·쪽 이동·배율은 화면 버튼으로 조작하세요";
         });
+        var fileSelectionGeneration = 0;
         var busy = false;
         var loadGeneration = 0,
           activeWorker = null,
@@ -4755,6 +4794,7 @@ cfb/cfb.js:
         }
 
         function reset() {
+          fileSelectionGeneration++;
           lineFitter.cancel();
           loadGeneration++;
           stopWorker();
@@ -5088,47 +5128,42 @@ cfb/cfb.js:
           setZoom(avail / pagePxWidth);
         }
 
-        function handleFiles(list) {
+        async function handleFiles(list) {
           if (busy) return;
-          var docs = [],
-            fonts = [];
-          for (var i = 0; i < list.length; i++) {
-            if (/\.(ttf|otf|ttc)$/i.test(list[i].name)) fonts.push(list[i]);
-            else docs.push(list[i]);
+          const selection = ++fileSelectionGeneration;
+          // Copy FileList now: resetting the input must not change pending work.
+          const selected = Array.from(list);
+          const fonts = selected.filter((file) => /\.(ttf|otf|ttc)$/i.test(file.name));
+          const docs = selected.filter((file) => !/\.(ttf|otf|ttc)$/i.test(file.name));
+          const failures = [];
+          let registered = 0;
+          for (const file of fonts) {
+            if (selection !== fileSelectionGeneration) return;
+            try {
+              if (file.size > 32 * 1024 * 1024)
+                throw new Error("글꼴 파일은 32MB 이하만 지원합니다.");
+              const bytes = await file.arrayBuffer();
+              if (selection !== fileSelectionGeneration) return;
+              const name = file.name.replace(/\.(ttf|otf|ttc)$/i, "").trim();
+              await registerFont(name, bytes, true);
+              registered++;
+            } catch (error) {
+              failures.push(file.name + ": " + error.message);
+            }
           }
-          var chain = Promise.resolve();
-          fonts.forEach(function (f) {
-            chain = chain.then(function () {
-              if (f.size > 32 * 1024 * 1024) throw new Error("글꼴 파일은 32MB 이하만 지원합니다.");
-              return f.arrayBuffer().then(function (buf) {
-                var name = f.name.replace(/\.(ttf|otf|ttc)$/i, "").trim();
-                return registerFont(name, buf, true)
-                  .then(function () {
-                    if (!docs.length) {
-                      fname.textContent = "글꼴 등록됨: " + name;
-                    }
-                  })
-                  .catch(function (e) {
-                    fail("글꼴 등록 실패: " + f.name, e.message);
-                  });
-              });
-            });
-          });
-          chain
-            .then(function () {
-              if (!docs.length) return;
-              openFile(docs[0]);
-              // 문서를 여러 개 떨어뜨리면 첫 개만 열린다는 점을 알린다 (조용히 무시하지 않도록)
-              if (docs.length > 1)
-                setTimeout(function () {
-                  try {
-                    fname.textContent += "  · 첫 번째 문서만 열림 (" + docs.length + "개 중)";
-                  } catch (e) {}
-                }, 800);
-            })
-            .catch(function (e) {
-              fail("파일 준비 실패", e.message);
-            });
+          if (selection !== fileSelectionGeneration) return;
+          if (docs.length) {
+            openFile(docs[0]);
+            // Set the annotation immediately; no delayed callback may label a new document.
+            if (docs.length > 1)
+              fname.textContent += " · 첫 번째 문서만 열림 (" + docs.length + "개 중)";
+            if (failures.length) fname.textContent += " · 글꼴 " + failures.length + "개 등록 실패";
+          } else {
+            // Font errors are recoverable and must not reset the current document.
+            $("appStatus").textContent = failures.length
+              ? "글꼴 등록 실패 — " + failures.join(" / ")
+              : "글꼴 " + registered + "개 등록됨";
+          }
         }
 
         function setLoading(on, msg) {
