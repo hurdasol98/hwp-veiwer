@@ -2,7 +2,8 @@
   "name": "hwp-viewer-dev",
   "private": true,
   "scripts": {
-    "test": "node tests/viewer.cjs"
+    "test": "node tests/viewer.cjs",
+    "test:simplification": "node tests/simplification.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

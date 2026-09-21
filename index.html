@@ -4793,6 +4793,14 @@ cfb/cfb.js:
           } catch (eS) {}
         }
 
+        function destroyLegacyViewer() {
+          if (!binInstance) return;
+          try {
+            binInstance.distory();
+          } catch (e) {}
+          binInstance = null;
+        }
+
         function reset() {
           fileSelectionGeneration++;
           lineFitter.cancel();
@@ -4801,12 +4809,7 @@ cfb/cfb.js:
           busy = false;
           setLoading(false);
           if (window.HWPViewer.Reader) window.HWPViewer.Reader.clear();
-          if (binInstance) {
-            try {
-              binInstance.distory();
-            } catch (e) {}
-            binInstance = null;
-          }
+          destroyLegacyViewer();
           blobUrls.forEach(function (u) {
             try {
               URL.revokeObjectURL(u);
@@ -4964,35 +4967,17 @@ cfb/cfb.js:
           if (token !== loadGeneration) return;
           files = prepared.files;
           var keys = Object.keys(files);
-          if (
-            !keys.some(function (k) {
-              return /header\.xml$/i.test(k);
-            })
-          ) {
-            if (
-              keys.some(function (k) {
-                return /^word\//.test(k);
-              })
-            )
-              return fail(
-                "이 파일은 Word 문서(docx)",
-                "확장자만 hwp로 되어 있음 — Word에서 열어야 함",
-              );
-            if (
-              keys.some(function (k) {
-                return /^xl\//.test(k);
-              })
-            )
-              return fail(
-                "이 파일은 Excel 문서(xlsx)",
-                "확장자만 hwp로 되어 있음 — Excel에서 열어야 함",
-              );
-            if (
-              keys.some(function (k) {
-                return /^ppt\//.test(k);
-              })
-            )
-              return fail("이 파일은 PowerPoint 문서(pptx)", "확장자만 hwp로 되어 있음");
+          if (!keys.some((key) => /header\.xml$/i.test(key))) {
+            const formats = [
+              ["word/", "Word 문서(docx)", " — Word에서 열어야 함"],
+              ["xl/", "Excel 문서(xlsx)", " — Excel에서 열어야 함"],
+              ["ppt/", "PowerPoint 문서(pptx)", ""],
+            ];
+            const format = formats.find(([prefix]) => keys.some((key) => key.startsWith(prefix)));
+            if (format) {
+              const [, label, guide] = format;
+              return fail("이 파일은 " + label, "확장자만 hwp로 되어 있음" + guide);
+            }
             return fail("HWPX 구조 아님 (header.xml 없음)", "zip 형식이지만 한글 문서가 아님");
           }
           try {
@@ -5006,14 +4991,18 @@ cfb/cfb.js:
 
         var currentBinary = null,
           currentPrepared = null;
+        function showBinary(binaryStr, badgeText = "HWP 5.0 · 전용 렌더러") {
+          var info = window.HWPViewer.Hwp.render(binaryStr, hxPage, document, currentPrepared);
+          showPaged(info, badgeText);
+          btnCompat.style.display = "inline-block";
+          btnCompat.textContent = "호환 모드";
+        }
+
         function openBinary(binaryStr, prepared) {
           currentBinary = binaryStr;
           currentPrepared = prepared;
           try {
-            var info = window.HWPViewer.Hwp.render(binaryStr, hxPage, document, currentPrepared);
-            showPaged(info, "HWP 5.0 · 전용 렌더러");
-            btnCompat.style.display = "inline-block";
-            btnCompat.textContent = "호환 모드";
+            showBinary(binaryStr);
             return;
           } catch (e) {
             console.warn("전용 렌더러 실패, hwp.js 폴백:", e.message);
@@ -5069,15 +5058,7 @@ cfb/cfb.js:
               binHint.style.display = "none";
               try {
                 hxPage.innerHTML = "";
-                var info = window.HWPViewer.Hwp.render(
-                  binaryStr,
-                  hxPage,
-                  document,
-                  currentPrepared,
-                );
-                showPaged(info, "HWP 5.0 · 전용 렌더러 (호환 모드 사용 불가)");
-                btnCompat.style.display = "inline-block";
-                btnCompat.textContent = "호환 모드";
+                showBinary(binaryStr, "HWP 5.0 · 전용 렌더러 (호환 모드 사용 불가)");
                 return;
               } catch (e2) {}
             }
@@ -5092,12 +5073,7 @@ cfb/cfb.js:
           if (!currentBinary) return;
           if (window.HWPViewer.Reader) window.HWPViewer.Reader.clear();
           var toLegacy = hxScroll.style.display === "block";
-          if (binInstance) {
-            try {
-              binInstance.distory();
-            } catch (e) {}
-            binInstance = null;
-          }
+          destroyLegacyViewer();
           binViewer.innerHTML = "";
           hxPage.innerHTML = "";
           binWrap.style.display = "none";
@@ -5106,15 +5082,7 @@ cfb/cfb.js:
           if (toLegacy) openLegacy(currentBinary, true);
           else {
             try {
-              var info = window.HWPViewer.Hwp.render(
-                currentBinary,
-                hxPage,
-                document,
-                currentPrepared,
-              );
-              showPaged(info, "HWP 5.0 · 전용 렌더러");
-              btnCompat.style.display = "inline-block";
-              btnCompat.textContent = "호환 모드";
+              showBinary(currentBinary);
               binHint.style.display = "none";
             } catch (e) {
               openLegacy(currentBinary);
@@ -5558,14 +5526,8 @@ cfb/cfb.js:
         // Most documents preserve UTF-16 offsets when lowercased. Allocate an offset
         // map only for expanding characters such as İ; surrogate pairs remain intact.
         function fold(text) {
-          let lower = "",
-            expanded = false;
-          for (const char of text) {
-            const f = char.toLowerCase();
-            lower += f;
-            if (f.length !== char.length) expanded = true;
-          }
-          if (!expanded) return { lower, starts: null, ends: null };
+          const lower = text.toLowerCase();
+          if (lower.length === text.length) return { lower, starts: null, ends: null };
           const starts = new Uint32Array(lower.length),
             ends = new Uint32Array(lower.length);
           let offset = 0,

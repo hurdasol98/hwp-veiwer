@@ -112,3 +112,18 @@ Layout.preserveLeadingSpaces는 양쪽 정렬 줄의 선행 공백을 고정 폭
 
 이 검사는 잘못된 글꼴, 지연된 파일 읽기, 초기화, 깨진 XML과 이미지 데이터를 의도적으로 만들어 실제 오류 경로를 검사합니다.
 두 파일은 서로 다른 정상 HWPX여야 합니다. PLAYWRIGHT_MODULE 환경변수를 지원합니다.
+
+## 문서 제어 코드 단순화 검사
+
+전용 HWP 표시와 호환 뷰어 해제는 각각 showBinary와 destroyLegacyViewer에서 처리합니다.
+다른 ZIP 문서의 오류 안내는 형식 목록에서 선택합니다.
+검색 본문은 검색어와 동일하게 문자열 전체를 소문자로 바꾸며, 길이가 늘어나는 문자에만 원문 위치 맵을 만듭니다.
+
+    npm run test:simplification
+
+외부 샘플 없이 합성 HWP/HWPX를 실제 파일 선택 경로로 엽니다.
+문서 열기, 모드 전환, 실패 시 복귀, 초기화, 다른 ZIP 형식의 오류 안내와 Unicode 검색 범위를 검사합니다.
+호환 뷰어 자체는 대역을 사용하므로 실제 hwp.js 문서 호환성 검사를 대체하지 않습니다.
+브라우저 검사는 Node.js 20 이상이 필요합니다.
+기본 브라우저는 Edge이며 Chrome은 BROWSER_CHANNEL=chrome으로 선택합니다.
+기존 PLAYWRIGHT_MODULE 환경변수도 지원합니다.
