@@ -77,13 +77,14 @@ async function offlineTest(browser) {
         measured.push(await page.evaluate(()=>{
           const line=[...document.querySelectorAll('.hx-seg > div')].find(e=>e.textContent.includes('인천 관내'));
           if(!line)return null;
-          const wrap=line.querySelector('.hx-fitwrap');
-          return {width:line.getBoundingClientRect().width,textWidth:wrap.getBoundingClientRect().width,scale:parseFloat(wrap.style.transform.match(/[\d.]+/)[0])};
+          const rect=line.getBoundingClientRect(), zoom=rect.width/line.offsetWidth;
+          const range=document.createRange();range.selectNodeContents(line);
+          return {textWidth:range.getBoundingClientRect().width/zoom, forcedWrap:!!line.querySelector('.hx-fitwrap')};
         }));
       }
       const lines=measured.filter(Boolean);
-      for(const m of lines){assert(m.scale>0.7);assert(m.textWidth<=m.width+3);}
-      if(lines.length) assert(Math.max(...lines.map(m=>m.scale))-Math.min(...lines.map(m=>m.scale))<0.05);
+      for(const m of lines) assert.equal(m.forcedWrap,false,'Source text must not be auto-compressed');
+      if(lines.length) assert(Math.max(...lines.map(m=>m.textWidth))-Math.min(...lines.map(m=>m.textWidth))<1);
       // Trigger print preparation twice: fitting must be repeatable.
       await page.evaluate(()=>{window.dispatchEvent(new Event('beforeprint'));window.dispatchEvent(new Event('beforeprint'));});
       assert.deepEqual(await snapshot(page),current);

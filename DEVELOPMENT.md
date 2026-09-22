@@ -14,7 +14,7 @@ package.json과 tests/는 개발 검증에만 사용합니다.
 | hxBundle | 외부 라이브러리 원본 번들 | HWPLIB; Worker에도 삽입 |
 | viewer-core | 공통 글꼴·글자 스타일 | HWPViewer.Typography |
 | font-storage | 등록 글꼴의 IndexedDB 저장 | HWPViewer.FontStore |
-| document-layout | 두 형식 공통 쪽 배치·줄 보정 | HWPViewer.Layout |
+| document-layout | 두 형식 공통 쪽 배치·선행 공백 보존 | HWPViewer.Layout |
 | hwpx-distribution | 배포용 HWPX 복호화·검사 | HWPViewer.Distribution |
 | hwpx-renderer | XML 문단·표 해석과 DOM 생성 | HWPViewer.Hwpx |
 | hwp-renderer | HWP 바이너리 해석과 DOM 생성 | HWPViewer.Hwp |
@@ -30,12 +30,12 @@ package.json과 tests/는 개발 검증에만 사용합니다.
 - 글자 크기·색·장평·대체 글꼴: Typography.applyCharacter / fontFallback.
 - HWPX 속성 변환: hwpx-renderer의 applyCharPr.
 - HWP 숫자 색상·글꼴 ID 변환: hwp-renderer의 applyChar. 공통 스타일로 변환해 Typography에 전달합니다.
-- 배율 보정: Layout.fitLines. DOMRect는 확대 후 좌표이고 clientWidth/scrollWidth는 확대 전 좌표입니다. 같은 단위로 변환해야 합니다.
+- 줄 정리: Layout.fitLines는 선행 공백 보존과 인쇄용 넘침 판정만 합니다. 줄 위치·폭·글자 크기를 자동으로 바꾸지 않습니다.
 - 쪽 나눔: Layout.layoutSection과 내부 paginate/repairOverflow 계열.
 - 배포용 복호화: Distribution.prepare. 입력 파일 맵은 성공 전까지 변경하지 않습니다.
 - UI 연결·문서 전환: viewer-controller. loadGeneration으로 늦게 도착한 결과를 무시합니다.
 
-HWP/HWPX 원시 파서는 형식별로 유지합니다. 표의 소스 속성 해석도 별도이며, 공통 글자 스타일과 최종 페이지 배치·줄 보정만 공유합니다.
+HWP/HWPX 원시 파서는 형식별로 유지합니다. 표의 소스 속성 해석도 별도이며, 공통 글자 스타일과 최종 페이지 배치만 공유합니다.
 이번 작업은 미지원 도형이나 모든 표 제목행 반복을 새로 구현하는 작업은 아닙니다.
 
 ## 레이아웃 갱신 규칙
@@ -44,9 +44,10 @@ createFitter(root)는 schedule / flush / cancel을 제공합니다.
 - 배율 변경·글꼴 등록·문서 표시 후: schedule(). 연속 요청은 합쳐 처리합니다.
 - 인쇄 버튼 및 beforeprint: flush(). 임의의 120ms 지연에 의존하지 않습니다.
 - 문서 초기화: cancel(). 이전 문서의 예약 작업을 제거합니다.
-- afterprint: schedule(). 화면 기준으로 다시 보정합니다.
+- afterprint: schedule(). 화면 기준으로 넘침 여부를 다시 확인합니다.
 
-페이지 분할 알고리즘 자체는 유지했습니다. 글꼴 변경 뒤 모든 페이지를 원본 모델에서 다시 조판하는 엔진은 아직 없습니다.
+페이지 분할은 실측 본문 높이를 기준으로 합니다. offsetHeight/scrollHeight의 정수 반올림에 대한 1 CSS px 허용 오차만 둡니다.
+글꼴 변경 뒤 모든 페이지를 원본 모델에서 다시 조판하는 엔진은 아직 없습니다.
 
 ## 저장과 캐시
 
@@ -84,6 +85,24 @@ BROWSER_CHANNEL=chrome으로 Chrome을 사용할 수 있습니다.
 검사 내용: 인라인 문법, 런타임 외부 스크립트 부재, 문서 열기, 기존 결과 대조,
 75~200% 배율과 폭맞춤, 반복 보정, 검색, 인쇄 준비, Worker 대체 경로,
 비동기 처리 중 취소, 앱 셸만 캐시하는지 확인, 오프라인 새로고침.
+
+## 임의 위치·축소 보정 제거
+
+- 줄의 가로 압축과 왼쪽 강제 이동, 페이지 전체 자동 축소를 제거했습니다.
+- 문단 간격 비례 회수, 좁은 셀의 들여쓰기·여백 축소, 개체의 강제 위쪽 이동을 제거했습니다.
+- 문단 높이 60%/25% 기준의 후속 이동과 60px/70px 기준의 추측 배치를 제거했습니다.
+- 원본 글자 크기·장평, 셀 여백, 탭 좌표와 사용자가 선택하는 화면 확대는 유지합니다.
+- 한 쪽보다 큰 분할 불가 내용은 원래 크기를 유지하고 인쇄에서 자연스럽게 이어집니다.
+- HWP 용지 정보의 머리말·꼬리말 영역 높이를 보존합니다. 머리말은 원본 위쪽 용지 여백 뒤에, 꼬리말은 본문 영역 뒤에 배치하며 28% 비율을 사용하지 않습니다.
+- 저장된 표 제목행 반복 플래그를 따르며 20행 이상 조건을 적용하지 않습니다. 복잡한 병합 제목행의 완전한 재현은 별도 검증이 필요합니다.
+
+    npm run test:layout
+
+Node.js 20 이상과 Playwright가 필요하며 BROWSER_CHANNEL, PLAYWRIGHT_MODULE을 지원합니다.
+합성 문서로 정렬·확대·글자 폭 변경, 탭 위치, 쪽 나눔 경계, 셀 여백, 병합 행, 머리말·꼬리말 여백 해석, 인쇄 모드와 2쪽 PDF 생성을 검사합니다.
+원본 글꼴이 없으면 대체 글꼴의 폭 차이가 그대로 드러날 수 있습니다. 임의로 눌러 맞추지 않으므로 정확한 재현에는 원본 글꼴이 필요할 수 있습니다.
+
+여백 해석 참고: [한컴 용지 여백 안내](https://help.hancom.com/hoffice130/ko-KR/Hwp/format/setting_paper/setting_paper(margins).htm).
 
 ## 이번 검증 결과
 
