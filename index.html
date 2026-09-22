@@ -1065,78 +1065,49 @@ cfb/cfb.js:
           if (sheet) sec.style.width = originalWidth;
         }
 
-        // Preserve only fully described, monotonic page-local source layouts. Missing
-        // coordinates, floating objects and truly overlong tables keep the flow fallback.
-        function alignSourcePages(root, contentHpx) {
-          root.querySelectorAll(".hx-pagecard").forEach(function (card) {
-            var units = Array.from(card.children),
-              previousEnd = -1;
-            var valid =
-              units.length > 0 &&
-              units.every(function (unit) {
-                var raw = unit.dataset.y0 !== undefined ? unit.dataset.y0 : unit.dataset.fy0;
-                var top = Number(raw),
-                  end = Number(unit.dataset.sourceEnd);
-                if (
-                  raw === undefined ||
-                  unit.dataset.sourceEnd === undefined ||
-                  !Number.isFinite(top) ||
-                  !Number.isFinite(end) ||
-                  top < 0 ||
-                  end < top ||
-                  top + 0.5 < previousEnd ||
-                  end * (96 / 72) > contentHpx + 1
-                )
-                  return false;
-                previousEnd = end;
-                return true;
-              });
-            if (!valid) {
-              delete card.dataset.sourcePage;
-              return;
-            }
-            card.dataset.sourcePage = "1";
-            // Reconcile every unit, including table -> table. Never add the table
-            // height and its source anchor height twice, and never overlap content.
-            units.forEach(function (unit) {
-              unit.style.marginTop = "0";
-              unit.style.marginBottom = "0";
-              unit.style.display = "flow-root";
-            });
-            // Complete style writes before measuring. Margins do not affect the
-            // flow-root's own height, so positioning needs no further layout reads.
-            var heights = units.map(function (unit) {
-              return unit.getBoundingClientRect().height;
-            });
-            var used = 0;
-            units.forEach(function (unit, index) {
-              var raw = unit.dataset.y0 !== undefined ? unit.dataset.y0 : unit.dataset.fy0;
-              var gap = Math.max(0, Number(raw) * (96 / 72) - used);
-              unit.style.marginTop = gap + "px";
-              used += gap + heights[index];
-            });
-          });
+        // Stored line coordinates are points; all source placement uses this conversion.
+        const POINT_TO_PX = 96 / 72;
+        function createSourcePager(openPage, currentPage) {
+          let lastY = null;
+          return {
+            cur: currentPage,
+            shouldBreak(y) { return lastY !== null && y < lastY; },
+            mark(y) { lastY = y; },
+            page() { lastY = null; return openPage(); },
+          };
         }
 
-        // 개체 높이가 앵커줄에 미포함인 저장기 호환: 부착 후 실측으로 표 직후 간격 재계산
-        function reflowFlowGaps(root) {
-          var PT = 96 / 72;
+        // A complete source page owns its geometry. Browser font metrics must not
+        // move subsequent paragraphs or change its page count.
+        function alignSourcePages(root) {
           root.querySelectorAll(".hx-pagecard").forEach(function (card) {
-            if (card.dataset.sourcePage === "1") return;
-            var prevFlow = null;
-            Array.prototype.forEach.call(card.children, function (u) {
-              if (u.dataset && u.dataset.fy0) {
-                prevFlow = u;
-                return;
-              }
-              if (prevFlow && u.dataset && u.dataset.y0) {
-                var fy0 = parseFloat(prevFlow.dataset.fy0);
-                var fend = parseFloat(prevFlow.dataset.fend);
-                var realEnd = fy0 + prevFlow.offsetHeight / PT;
-                var gap = parseFloat(u.dataset.y0) - Math.max(fend, realEnd);
-                u.style.marginTop = gap > 0.05 && gap < 2000 ? gap * PT + "px" : "0";
-              }
-              prevFlow = null;
+            const units = Array.from(card.children).filter(unit =>
+              !unit.matches(".hx-runhead,.hx-runfoot"));
+            const coordinates = units.map(function (unit) {
+              const raw = unit.dataset.y0 ?? unit.dataset.fy0;
+              return { top: Number(raw), end: Number(unit.dataset.sourceEnd),
+                present: raw !== undefined && unit.dataset.sourceEnd !== undefined };
+            });
+            if (!units.length || !coordinates.every(c => c.present &&
+                Number.isFinite(c.top) && Number.isFinite(c.end) && c.top >= 0 && c.end >= c.top)) return;
+            card.dataset.sourcePage = "1";
+            card.style.position = "relative";
+            const padding = getComputedStyle(card);
+            units.forEach(function (unit, index) {
+              const c = coordinates[index];
+              unit.style.position = "absolute";
+              unit.style.top = (parseFloat(padding.paddingTop) + c.top * POINT_TO_PX) + "px";
+              unit.style.left = padding.paddingLeft;
+              unit.style.right = padding.paddingRight;
+              unit.style.marginTop = "0";
+              unit.style.marginBottom = "0";
+              unit.style.height = (c.end - c.top) * POINT_TO_PX + "px";
+              unit.querySelectorAll(":scope > [data-line-y]").forEach(function (line) {
+                line.style.position = "absolute";
+                line.style.top = (Number(line.dataset.lineY) - c.top) * POINT_TO_PX + "px";
+                line.style.left = "0";
+                line.style.right = "0";
+              });
             });
           });
         }
@@ -1165,6 +1136,7 @@ cfb/cfb.js:
           };
           for (var ci = 0; ci < cards.length; ci++) {
             var card = cards[ci];
+            if (card.dataset.sourcePage === "1") continue;
             // 카드 높이는 A4 최소높이에 가려지므로 '자식 높이 합'으로 실제 내용량을 잰다
             var sumH = 0;
             for (var sm = 0; sm < card.children.length; sm++) {
@@ -1449,9 +1421,7 @@ cfb/cfb.js:
                 cd.remove();
             }
           }
-          var contentHguard = (pi.h - pi.mt - pi.mb) * info.U2PX;
-          alignSourcePages(root, contentHguard);
-          reflowFlowGaps(root);
+          alignSourcePages(root);
           repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
           var cards3 = root.querySelectorAll(".hx-pagecard");
           for (var c3 = 0; c3 < cards3.length; c3++) {
@@ -1563,7 +1533,7 @@ cfb/cfb.js:
           }
           return Object.freeze({ schedule, flush, cancel });
         }
-        return Object.freeze({ layoutSection, fitLines, createFitter });
+        return Object.freeze({ layoutSection, fitLines, createFitter, createSourcePager });
       })();
     </script>
     <script id="hwpx-distribution">
@@ -2151,7 +2121,7 @@ cfb/cfb.js:
             descByLn(p, "ole").length;
           if (kids) return false;
           for (var i = 0; i < segs.length; i++) {
-            if (!(segs[i].box > 0.5 && segs[i].box < 400)) return false;
+            if (!(Number.isFinite(segs[i].box) && segs[i].box > 0)) return false;
             if (i && segs[i].pos <= segs[i - 1].pos) return false;
           }
           return true;
@@ -2210,7 +2180,7 @@ cfb/cfb.js:
           };
           if (flowState && flowState.prevEnd !== null) {
             var gap = gy(segs[0]) - flowState.prevEnd; // 흐름 시작(prevEnd 없음)엔 gap 없음 — 위치는 컨테이너/개체가 담당
-            if (gap > 0.05 && gap < 2000) {
+            if (gap > 0) {
               div.style.marginTop = gap * PT2PX + "px";
               div.dataset.sourceGap = "1";
             }
@@ -2226,7 +2196,10 @@ cfb/cfb.js:
           var openLine = function () {
             line = env.doc.createElement("div");
             var s = segs[segIdx];
-            if (pager) div.dataset.sourceEnd = String(s.y + s.h);
+            if (pager) {
+              div.dataset.sourceEnd = String(s.y + s.h);
+              line.dataset.lineY = String(s.y);
+            }
             line.style.height =
               (trimCellTail && segIdx === segs.length - 1 ? s.h : s.box) * PT2PX + "px";
             line.style.lineHeight = s.h * PT2PX + "px";
@@ -2279,9 +2252,9 @@ cfb/cfb.js:
               np.appendChild(div);
               flowState.prevEnd = null;
               var g2 = gy(s) - (flowState.base || 0);
-              if (g2 > 0.05 && g2 < 2000) div.style.marginTop = g2 * PT2PX + "px";
+              if (g2 > 0) div.style.marginTop = g2 * PT2PX + "px";
             }
-            pager.mark(gy(s) + s.box);
+            pager.mark(gy(s));
           };
           maybeBreak();
           openLine();
@@ -2493,7 +2466,7 @@ cfb/cfb.js:
             breaks = [];
           if (!descByLn(p, "tbl").length) return [p];
           for (var i = 1; i < segs.length; i++) {
-            if (segs[i - 1].y - segs[i].y > 120) breaks.push(segs[i].pos);
+            if (segs[i].y < segs[i - 1].y) breaks.push(segs[i].pos);
           }
           if (!breaks.length) return [p];
           var entries = [],
@@ -2671,27 +2644,14 @@ cfb/cfb.js:
               var root = sdoc.documentElement;
               var flowState = { prevEnd: null, base: 0 };
               var pageDiv = null;
-              var pager = {
-                lastEnd: -1,
-                cur: function () {
-                  return pageDiv;
-                },
-                shouldBreak: function (y) {
-                  return this.lastEnd - y > 120;
-                },
-                mark: function (end) {
-                  this.lastEnd = Math.max(this.lastEnd, end);
-                },
-                page: function () {
-                  pageDiv = docRef.createElement("div");
-                  pageDiv.className = "hx-pagecard";
-                  secDiv.appendChild(pageDiv);
-                  this.lastEnd = -1;
-                  flowState.prevEnd = null;
-                  flowState.base = 0;
-                  return pageDiv;
-                },
-              };
+              var pager = window.HWPViewer.Layout.createSourcePager(function () {
+                pageDiv = docRef.createElement("div");
+                pageDiv.className = "hx-pagecard";
+                secDiv.appendChild(pageDiv);
+                flowState.prevEnd = null;
+                flowState.base = 0;
+                return pageDiv;
+              }, function () { return pageDiv; });
               pager.page();
               try {
                 window.__hxPageTopPx = (pageInfo ? pageInfo.mt : 5668) * U2PX;
@@ -2716,7 +2676,7 @@ cfb/cfb.js:
                     if (hasY) {
                       var startRef = flowState.prevEnd !== null ? flowState.prevEnd : 0;
                       var gap = segs[0].y - startRef;
-                      if (gap > 0.05 && gap < 2000) {
+                      if (gap > 0) {
                         el.style.marginTop = gap * PT2PX + "px";
                         el.dataset.sourceGap = "1";
                       }
@@ -2726,7 +2686,7 @@ cfb/cfb.js:
                       if (el.dataset.sourceLineHeight && segs.length === 1)
                         el.dataset.sourceEnd = String(last.y + last.h);
                       flowState.prevEnd = last.y + last.box;
-                      pager.mark(flowState.prevEnd);
+                      pager.mark(last.y);
                     } else flowState.prevEnd = null;
                     pageDiv.appendChild(el);
                   }
@@ -3521,7 +3481,7 @@ cfb/cfb.js:
                   ? flowState.base
                   : para.segs[0].y; // 셀·글상자: 첫 gap 없음(padding이 담당)
             var gap = para.segs[0].y - startRef;
-            if (gap > 0.05 && gap < 2000) div.style.marginTop = gap * PT2PX + "px";
+            if (gap > 0) div.style.marginTop = gap * PT2PX + "px";
             flowState.prevEnd =
               para.segs[para.segs.length - 1].y + para.segs[para.segs.length - 1].box;
           }
@@ -3548,7 +3508,10 @@ cfb/cfb.js:
           var openLine = function () {
             line = ctx.doc.createElement("div");
             var s = para.segs[segIdx];
-            if (pager) div.dataset.sourceEnd = String(s.y + s.h);
+            if (pager) {
+              div.dataset.sourceEnd = String(s.y + s.h);
+              line.dataset.lineY = String(s.y);
+            }
             // A cell's final line has no following line: its trailing interline gap is not cell content.
             var lineBox = trimCellTail && segIdx === para.segs.length - 1 ? s.h : s.box;
             line.style.height = lineBox * PT2PX + "px";
@@ -3609,9 +3572,9 @@ cfb/cfb.js:
               np.appendChild(div);
               flowState.prevEnd = null; // 새 페이지 y 회계 리셋
               var g2 = s.y - 0;
-              if (g2 > 0.05 && g2 < 2000) div.style.marginTop = g2 * PT2PX + "px";
+              if (g2 > 0) div.style.marginTop = g2 * PT2PX + "px";
             }
-            pager && pager.mark(s.y + s.box);
+            pager.mark(s.y);
           };
           maybeBreak();
           openLine();
@@ -3651,7 +3614,7 @@ cfb/cfb.js:
             var p = para.segs[i].pos;
             if (p <= prev && i > 0) return false;
             if (p > para.chars.length) return false;
-            if (!(para.segs[i].box > 0.5 && para.segs[i].box < 400)) return false;
+            if (!(Number.isFinite(para.segs[i].box) && para.segs[i].box > 0)) return false;
             prev = p;
           }
           return true;
@@ -4105,36 +4068,23 @@ cfb/cfb.js:
               flowState.prevEnd = null;
               flowState.base = 0;
             };
-            var pager = {
-              lastEnd: -1,
-              shouldBreak: function (y) {
-                return this.lastEnd >= 0 && y + 0.5 < this.lastEnd;
-              },
-              mark: function (end) {
-                if (end > this.lastEnd) this.lastEnd = end;
-              },
-              page: function () {
-                openPage();
-                this.lastEnd = -1;
-                return pageDiv;
-              },
-              cur: function () {
-                return pageDiv;
-              },
-            };
+            var pager = window.HWPViewer.Layout.createSourcePager(function () {
+              openPage();
+              return pageDiv;
+            }, function () { return pageDiv; });
             openPage();
             sec.paras.forEach(function (p) {
               var hasY = p.segs.length > 0;
               if (canSeg(p)) {
                 renderParaSeg(p, ctx, flowState, pager); // 줄 단위로 카드에 직접 커밋
               } else {
-                if (hasY && pager.lastEnd > 100 && pager.shouldBreak(p.segs[0].y)) pager.page(); // 개체 y는 배치좌표 오염 가능: 페이지가 충분히 진행된 경우만 리셋 인정
+                if (hasY && pager.shouldBreak(p.segs[0].y)) pager.page();
                 var el = renderPara(p, ctx);
                 if (hasY) {
                   // 표·개체 문단: 원본 y로 위치 잡고 회계 지속 (이중 계상 방지)
                   var startRef = flowState.prevEnd !== null ? flowState.prevEnd : flowState.base;
                   var gap = p.segs[0].y - startRef;
-                  if (gap > 0.05 && gap < 2000) el.style.marginTop = gap * (96 / 72) + "px";
+                  if (gap > 0) el.style.marginTop = gap * (96 / 72) + "px";
                   var lastS = p.segs[p.segs.length - 1];
                   el.dataset.fy0 = p.segs[0].y.toFixed(2); // 부착 후 실높이 보정용
                   el.dataset.fend = (lastS.y + lastS.box).toFixed(2);
@@ -4143,7 +4093,7 @@ cfb/cfb.js:
                     el.dataset.sourceEnd = String(lastS.y + lastS.h);
                   pageDiv.appendChild(el);
                   flowState.prevEnd = lastS.y + lastS.box;
-                  pager.mark(lastS.y + lastS.box);
+                  pager.mark(lastS.y);
                 } else {
                   flowState.prevEnd = null;
                   pageDiv.appendChild(el);

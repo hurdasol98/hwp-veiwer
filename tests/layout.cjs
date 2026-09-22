@@ -160,8 +160,64 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       }
       results.push('PASS parsed HWP/HWPX margins and running header/footer positions');
 
-      // Real file-open/print path: 70px + 60px of lines in a 100px body.
-      const doc = '<sec><p><run><secPr><pagePr width="45000" height="11250"><margin left="750" right="750" top="1875" bottom="1875" header="0" footer="0"/></pagePr></secPr><t>FIRST</t></run><linesegarray><lineseg textpos="0" vertpos="0" vertsize="5250" spacing="0"/></linesegarray></p><p><run><t>SECOND</t></run><linesegarray><lineseg textpos="0" vertpos="5250" vertsize="4500" spacing="0"/></linesegarray></p></sec>';
+      // Both parsers must interpret the same stored starts, including a reset
+      // smaller than the old 120pt HWPX threshold and overlapping line boxes.
+      for (const starts of [[1000, 2000, 500], [1000, 1500, 2500]]) {
+        const xmlParas = starts.map((y, i) => '<p><run><t>' + String.fromCharCode(65+i) + '</t></run><linesegarray><lineseg textpos="0" vertpos="' + y + '" vertsize="1000" spacing="500"/></linesegarray></p>').join('');
+        const hxRoot = document.createElement('div');
+        HWPViewer.Hwpx.render({ 'Contents/header.xml': enc('<head/>'), 'Contents/section0.xml': enc('<sec>' + xmlParas + '</sec>') }, hxRoot, document);
+        const bytes = starts.flatMap((y, i) => {
+          const seg = new Uint8Array(36), view = new DataView(seg.buffer);
+          [0, y, 1000, 1000, 800, 500, 0, 20000, 0].forEach((n,j) => view.setInt32(j*4,n,true));
+          return [...record(66,0,new Uint8Array(22)), ...record(67,1,new Uint8Array([65+i,0])), ...record(69,1,seg)];
+        });
+        const hRoot = document.createElement('div');
+        HWPViewer.Hwp.render('', hRoot, document, { cont: cfb, streams: { DocInfo: new Uint8Array(0), [cfb.FullPaths.find(p => p.endsWith('/BodyText/Section0'))]: new Uint8Array(bytes) } });
+        const expectedPages = starts[2] < starts[1] ? 2 : 1;
+        for (const rendered of [hxRoot, hRoot]) {
+          document.body.appendChild(rendered);
+          const sec = rendered.querySelector('.hx-section');
+          HWPViewer.Layout.layoutSection(sec, { ...info, pageInfo: sec._pageInfo, U2PX: 1/75 });
+          check(sec.querySelectorAll('.hx-pagecard').length === expectedPages, 'same page reset rule ' + (rendered === hxRoot ? 'HWPX' : 'HWP') + ' starts=' + starts + ' actual=' + sec.querySelectorAll('.hx-pagecard').length);
+          check([...sec.querySelectorAll('.hx-pagecard')].every(c => c.dataset.sourcePage === '1'), 'source geometry selected');
+          const paras = [...sec.querySelectorAll('.hx-seg')];
+          const positions = paras.map(p => p.style.top);
+          for (const zoom of [0.75, 1, 2]) {
+            sec.style.zoom = zoom;
+            paras.forEach(p => p.style.fontSize = '80px');
+            HWPViewer.Layout.layoutSection(sec, { ...info, pageInfo: sec._pageInfo, U2PX: 1/75 });
+            HWPViewer.Layout.fitLines(sec);
+            check(paras.every((p,i) => p.style.top === positions[i]), 'font/zoom cannot move source paragraphs');
+            check(sec.querySelectorAll('.hx-pagecard').length === expectedPages, 'font/zoom cannot repaginate source pages');
+          }
+          rendered.remove();
+        }
+      }
+      {
+        const { root, card } = section();
+        const p = paragraph(card, 250, 'OVERFLOW');p.dataset.y0 = '10';p.dataset.sourceEnd = '200';
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.querySelectorAll('.hx-pagecard').length === 1, 'stored page is not repaginated by measured overflow');
+        near(parseFloat(p.style.top), 25 + 10*96/72, 'single source coordinate conversion');
+        root.remove();
+      }
+      {
+        const { root, card } = section();
+        const p = paragraph(card, 20, '');p.className = 'hx-p hx-seg';
+        p.dataset.y0 = '10';p.dataset.sourceEnd = '65';
+        for (const y of [10, 30, 55]) {
+          const line = document.createElement('div');line.dataset.lineY = y;
+          line.style.height = '10px';line.textContent = 'LINE';p.appendChild(line);
+        }
+        HWPViewer.Layout.layoutSection(root, info);
+        [...p.children].forEach((line,i) => near(parseFloat(line.style.top), [0,20,45][i]*96/72, 'line uses stored y, not accumulated height'));
+        root.remove();
+      }
+      results.push('PASS shared HWP/HWPX page resets and source geometry independent of fonts/zoom');
+
+
+      // Real file-open/print path: an explicit source page break.
+      const doc = '<sec><p><run><secPr><pagePr width="45000" height="11250"><margin left="750" right="750" top="1875" bottom="1875" header="0" footer="0"/></pagePr></secPr><t>FIRST</t></run><linesegarray><lineseg textpos="0" vertpos="0" vertsize="5250" spacing="0"/></linesegarray></p><p pageBreak="1"><run><t>SECOND</t></run><linesegarray><lineseg textpos="0" vertpos="0" vertsize="4500" spacing="0"/></linesegarray></p></sec>';
       const zip = HWPLIB.CFB.utils.cfb_new();
       HWPLIB.CFB.utils.cfb_add(zip, 'Contents/header.xml', enc('<head/>'));
       HWPLIB.CFB.utils.cfb_add(zip, 'Contents/section0.xml', enc(doc));
