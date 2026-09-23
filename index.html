@@ -1065,6 +1065,33 @@ cfb/cfb.js:
           if (sheet) sec.style.width = originalWidth;
         }
 
+        function reflowCellText(root) {
+          // Source line breaks are retained when they fit. Missing fonts must not
+          // make a cell's text paint over the neighbouring cell.
+          const overflowing = [];
+          root.querySelectorAll("td .hx-seg > div").forEach(function (line) {
+            const cell = line.closest("td");
+            const bounds = cell.getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(line);
+            const rect = range.getBoundingClientRect();
+            const zoom = bounds.width / cell.offsetWidth || 1;
+            if (rect.width && (rect.right > bounds.right + zoom || rect.left < bounds.left - zoom))
+              overflowing.push(line);
+          });
+          overflowing.forEach(function (line) {
+            line.style.minHeight = line.style.height;
+            line.style.height = "auto";
+            line.style.whiteSpace = "pre-wrap";
+            line.style.overflowWrap = "anywhere";
+            line.style.lineHeight = "normal";
+            line.querySelectorAll(':scope > span[style*="absolute"]').forEach(function (span) {
+              span.style.position = "static";
+              span.style.whiteSpace = "pre-wrap";
+            });
+          });
+        }
+
         // Stored line coordinates are points; all source placement uses this conversion.
         const POINT_TO_PX = 96 / 72;
         function createSourcePager(openPage, currentPage) {
@@ -1083,18 +1110,56 @@ cfb/cfb.js:
           root.querySelectorAll(".hx-pagecard").forEach(function (card) {
             const units = Array.from(card.children).filter(unit =>
               !unit.matches(".hx-runhead,.hx-runfoot"));
+            const geometryKeys = ["position", "top", "left", "right", "marginTop", "marginBottom", "height"];
+            function restoreGeometry(el) {
+              if (el._flowGeometry) geometryKeys.forEach(key => el.style[key] = el._flowGeometry[key]);
+            }
+            units.forEach(function (unit) {
+              restoreGeometry(unit);
+              unit.querySelectorAll(":scope > [data-line-y]").forEach(restoreGeometry);
+            });
+            delete card.dataset.sourcePage;
             const coordinates = units.map(function (unit) {
               const raw = unit.dataset.y0 ?? unit.dataset.fy0;
               return { top: Number(raw), end: Number(unit.dataset.sourceEnd),
                 present: raw !== undefined && unit.dataset.sourceEnd !== undefined };
             });
-            if (!units.length || !coordinates.every(c => c.present &&
-                Number.isFinite(c.top) && Number.isFinite(c.end) && c.top >= 0 && c.end >= c.top)) return;
+            const complete = units.length && coordinates.every(c => c.present &&
+              Number.isFinite(c.top) && Number.isFinite(c.end) && c.top >= 0 && c.end >= c.top);
+            const padding = getComputedStyle(card);
+            const available = parseFloat(card.style.minHeight) -
+              parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
+            // An object's anchor line does not describe the full table extent.
+            // Only preserve fixed geometry when actual content fits without overlap.
+            const extents = units.map((unit, i) => Math.max(
+              (coordinates[i].end - coordinates[i].top) * POINT_TO_PX,
+              unit.scrollHeight, unit.offsetHeight));
+            const fits = complete && coordinates.every((c, i) => {
+              const bottom = c.top * POINT_TO_PX + extents[i];
+              const boundary = i + 1 < units.length ? coordinates[i + 1].top * POINT_TO_PX : available;
+              // Text glyph ink can exceed a line box; only block extents determine collision.
+              const end = units[i].querySelector("table,img,.hx-shape") ? bottom : c.end * POINT_TO_PX;
+              return end <= boundary + MEASUREMENT_TOLERANCE;
+            });
+            if (!fits) {
+              // Preserve source gaps when possible, while keeping overflowing objects
+              // in normal flow so row/line pagination can carry them onto another page.
+              let previousEnd = 0;
+              units.forEach(function (unit, i) {
+                const c = coordinates[i];
+                if (Number.isFinite(c.top)) {
+                  const gap = Math.max(0, c.top * POINT_TO_PX - previousEnd);
+                  unit.style.marginTop = gap + "px";
+                  previousEnd = Math.max(previousEnd, c.top * POINT_TO_PX) + unit.offsetHeight;
+                } else previousEnd += unit.offsetHeight;
+              });
+              return;
+            }
             card.dataset.sourcePage = "1";
             card.style.position = "relative";
-            const padding = getComputedStyle(card);
             units.forEach(function (unit, index) {
               const c = coordinates[index];
+              unit._flowGeometry = Object.fromEntries(geometryKeys.map(key => [key, unit.style[key]]));
               unit.style.position = "absolute";
               unit.style.top = (parseFloat(padding.paddingTop) + c.top * POINT_TO_PX) + "px";
               unit.style.left = padding.paddingLeft;
@@ -1103,6 +1168,7 @@ cfb/cfb.js:
               unit.style.marginBottom = "0";
               unit.style.height = (c.end - c.top) * POINT_TO_PX + "px";
               unit.querySelectorAll(":scope > [data-line-y]").forEach(function (line) {
+                line._flowGeometry = Object.fromEntries(geometryKeys.map(key => [key, line.style[key]]));
                 line.style.position = "absolute";
                 line.style.top = (Number(line.dataset.lineY) - c.top) * POINT_TO_PX + "px";
                 line.style.left = "0";
@@ -1421,6 +1487,7 @@ cfb/cfb.js:
                 cd.remove();
             }
           }
+          reflowCellText(root);
           alignSourcePages(root);
           repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
           var cards3 = root.querySelectorAll(".hx-pagecard");
@@ -3641,6 +3708,8 @@ cfb/cfb.js:
             div.style.marginTop = "0";
             div.style.marginBottom = "0";
             div.style.textIndent = "0";
+            // Hanging indent belongs to text lines, not a block table's container.
+            div.style.paddingLeft = "0";
             div.style.minHeight = "0";
             para.blocks.forEach(function (block) {
               var node = renderBlock(block, ctx);

@@ -94,9 +94,22 @@ async function offlineTest(browser) {
       await page.reload();await page.evaluate(()=>{window.Worker=function(){throw Error('Test: Worker unavailable')};});
       await page.locator('#fileInput').setInputFiles(file);await page.waitForFunction(()=>document.querySelectorAll('.hx-pagecard').length);
       assert.deepEqual(await snapshot(page),current);
-      // Late asynchronous decoding must not resurrect a cancelled document.
-      await page.reload();await page.evaluate(()=>{const original=HWPViewer.Distribution.prepare;HWPViewer.Distribution.prepare=async f=>{await new Promise(r=>setTimeout(r,300));return original(f)};});
-      await page.locator('#fileInput').setInputFiles(file);await page.locator('#cancelLoad').click();await page.waitForTimeout(650);
+      // Release the file read after cancellation, independent of file format/speed.
+      await page.reload();
+      await page.evaluate(() => {
+        const read = FileReader.prototype.readAsArrayBuffer;
+        FileReader.prototype.readAsArrayBuffer = function (file) {
+          window.releaseTestRead = () => {
+            this.addEventListener('loadend', () => window.testReadFinished = true, { once: true });
+            read.call(this, file);
+          };
+        };
+      });
+      await page.locator('#fileInput').setInputFiles(file);
+      await page.waitForFunction(() => !!window.releaseTestRead);
+      await page.locator('#cancelLoad').click();
+      await page.evaluate(() => window.releaseTestRead());
+      await page.waitForFunction(() => window.testReadFinished);
       assert.equal(await page.locator('.hx-pagecard').count(),0);
       assert.deepEqual(errors,[]);
       console.log('PASS',path.basename(file),JSON.stringify({pages:current.pages,tables:current.tables,rows:current.rows}), 'zoom/search/print preparation/fallback/cancel');

@@ -134,6 +134,32 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         check(td.style.paddingLeft === '20px' && td.style.paddingRight === '20px', 'source cell padding');
         check(line.style.paddingLeft === '50px', 'source indentation');root.remove();
       }
+      {
+        const { root, table } = tableCase([40, 40, 40]);
+        const wrapper = table.parentElement;
+        wrapper.dataset.fy0 = '0';wrapper.dataset.sourceEnd = '10';
+        const following = paragraph(wrapper.parentElement, 20, 'AFTER');
+        following.dataset.y0 = '20';following.dataset.sourceEnd = '35';
+        HWPViewer.Layout.layoutSection(root, info);
+        check(!root.querySelector('[data-source-page]'), 'table anchor height is not the complete table extent');
+        check(root.querySelectorAll('.hx-pagecard').length === 2, 'table with short source anchor must paginate');
+        const lastTable = [...root.querySelectorAll('table')].at(-1);
+        check(following.getBoundingClientRect().top >= lastTable.getBoundingClientRect().bottom - 1, 'following paragraph cannot overlap table');
+        root.remove();
+      }
+      {
+        const { root, table } = tableCase([20]);
+        table.style.width = '100px';table.style.tableLayout = 'fixed';
+        const cell = table.rows[0].cells[0];cell.textContent = '';
+        const para = document.createElement('div');para.className = 'hx-seg';
+        const line = document.createElement('div');line.style.cssText = 'height:14px;line-height:14px;white-space:pre;font-size:16px';
+        line.textContent = 'A long cell title that must wrap inside its own cell';
+        para.appendChild(line);cell.appendChild(para);
+        HWPViewer.Layout.layoutSection(root, info);
+        const range = document.createRange();range.selectNodeContents(line);
+        check(range.getBoundingClientRect().right <= cell.getBoundingClientRect().right + 1, 'long cell text wraps rather than overlaps');
+        check(line.offsetHeight > 14, 'wrapped text contributes to row height');root.remove();
+      }
       results.push('PASS table splitting, merged rows, repeat headers, padding and indentation');
 
       const enc = text => new TextEncoder().encode(text);
@@ -162,7 +188,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
       // Both parsers must interpret the same stored starts, including a reset
       // smaller than the old 120pt HWPX threshold and overlapping line boxes.
-      for (const starts of [[1000, 2000, 500], [1000, 1500, 2500]]) {
+      for (const starts of [[1000, 2000, 500], [1000, 2000, 3000]]) {
         const xmlParas = starts.map((y, i) => '<p><run><t>' + String.fromCharCode(65+i) + '</t></run><linesegarray><lineseg textpos="0" vertpos="' + y + '" vertsize="1000" spacing="500"/></linesegarray></p>').join('');
         const hxRoot = document.createElement('div');
         HWPViewer.Hwpx.render({ 'Contents/header.xml': enc('<head/>'), 'Contents/section0.xml': enc('<sec>' + xmlParas + '</sec>') }, hxRoot, document);
@@ -198,7 +224,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const p = paragraph(card, 250, 'OVERFLOW');p.dataset.y0 = '10';p.dataset.sourceEnd = '200';
         HWPViewer.Layout.layoutSection(root, info);
         check(root.querySelectorAll('.hx-pagecard').length === 1, 'stored page is not repaginated by measured overflow');
-        near(parseFloat(p.style.top), 25 + 10*96/72, 'single source coordinate conversion');
+        check(!card.dataset.sourcePage && p.style.position !== 'absolute', 'overflowing source metadata cannot disable flow layout');
         root.remove();
       }
       {
