@@ -24,7 +24,7 @@ if (!args.includes('--sample') || !sample) throw new Error('Use --sample /path/t
         document.querySelectorAll('.hx-pagecard').forEach((card, index) => {
           const r = card.getBoundingClientRect(), css = getComputedStyle(card);
           const zoom = r.width / card.offsetWidth, tolerance = 2 * zoom;
-          const bottom = r.bottom - parseFloat(css.paddingBottom) * zoom;
+          const bottom = r.top + (parseFloat(card.style.minHeight) - parseFloat(css.paddingBottom)) * zoom;
           const right = r.right - parseFloat(css.paddingRight) * zoom;
           let previousBottom = r.top;
           for (const table of card.querySelectorAll(':scope > .hx-p > table')) {

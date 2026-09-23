@@ -160,6 +160,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         check(range.getBoundingClientRect().right <= cell.getBoundingClientRect().right + 1, 'long cell text wraps rather than overlaps');
         check(line.offsetHeight > 14, 'wrapped text contributes to row height');root.remove();
       }
+      {
+        const { root, table } = tableCase([30, 30]);
+        table.parentElement.style.minHeight = '130px';
+        table.parentElement.dataset.sourceLineHeight = '130';
+        HWPViewer.Layout.layoutSection(root, info);
+        check(table.parentElement.offsetHeight <= 100, 'unsplit anchor minimum must not survive overflow repair');
+        check(!root.querySelector('.hx-tall'), 'stale minimum cannot create an extra print page');root.remove();
+      }
       results.push('PASS table splitting, merged rows, repeat headers, padding and indentation');
 
       const enc = text => new TextEncoder().encode(text);

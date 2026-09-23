@@ -160,3 +160,13 @@ HWP/HWPX 전용 렌더러는 `Layout.createSourcePager`를 공유한다. 이전 
 원본 좌표가 있어도 표 전체가 해당 줄 상자 높이에 포함되는 것은 아니다. `alignSourcePages`는 실제 표 높이가 다음 단위/본문 하단을 넘지 않는 경우에만 고정 배치를 사용한다. 넘으면 일반 흐름에서 간격을 계산하고 행 경계로 쪽을 나눈다. `renderPara`의 표 전용 문단은 글자용 내어쓰기 padding을 적용하지 않는다. 셀의 원본 줄이 셀 폭을 넘으면 `reflowCellText`가 줄바꿈을 허용해 행 높이에 반영한다. 글자를 줄이거나 자르지 않는다.
 
 추가 회귀 검사: `node tests/containment.cjs --sample /path/to/document.hwp`. 로컬 파일을 열어 75–200% 확대, 인쇄/복귀에서 표·셀 경계와 텍스트 보존, PDF 쪽 수를 검사한다. 입력 문서는 저장소에 포함하지 않는다. 합성 테스트에는 짧은 앵커로 표시된 긴 표와 긴 셀 글자를 포함한다.
+
+### HWP 의미 정보 보존
+
+`NUMBERING`과 `BULLET`은 각자 1부터 시작하는 참조 목록이다. 저장된 줄을 사용하는 문단에서도 머리표를 한 번 표시하며, PARA_TEXT에 없는 머리표가 UTF-16 위치 계산을 바꾸지 않도록 한다. HYPHEN 제어문자도 표시한다. HNC 전용 겹낫표 U+F0854/U+F0855는 원본 줄·서식 위치 해석 후 Unicode 『/』로 표시한다. 원본 파일 바이트는 변경하지 않지만 화면의 복사·검색·텍스트 추출에는 대체 문자가 사용된다.
+
+HWP BorderFill의 대각선 속성을 보존하고 셀 크기에 맞는 SVG 대각선을 그린다. 원본 font-family를 유지하며, FontFaceSet.check만으로 없는 시스템 글꼴을 설치된 것으로 판정하지 않는다. 대체 글꼴의 폭과 일부 선 종류/다중 대각선은 완전한 원본 재현과 차이가 남을 수 있다.
+
+`npm run test:fidelity`: 독립적인 글머리 ID, 빈 문단 머리표, 제어문자/PUA, 셀 대각선 및 없는 글꼴 판별을 합성 HWP로 검사한다. 표 넘침 복구에서는 분할 전 앵커의 min-height도 해제하여 인쇄용 추가 쪽이 생기지 않게 한다.
+
+참고: https://github.com/mete0r/pyhwp/blob/master/src/hwp5/binmodel/tagid20_border_fill.py (BorderFill 구조), https://github.com/mete0r/pyhwp/blob/master/src/hwp5/binmodel/controlchar.py (제어문자), https://github.com/rkttu/hwplibsharp/releases (HNC 겹낫표 코드 포인트). 코드는 기존 프로젝트 구조에 맞춰 작성했다.

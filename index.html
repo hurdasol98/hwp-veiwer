@@ -731,12 +731,21 @@ cfb/cfb.js:
         };
         // 서체 자체가 굵은 계열(헤드라인·견고딕 등)은 대체 시 합성 굵기 필요
         function faceInstalled(face) {
+          // FontFaceSet.check also returns true for unknown system family names.
+          // Compare two generic fallbacks so an absent family is not reported installed.
+          if (!face) return false;
+          if (/^(serif|sans-serif|monospace|cursive|fantasy|system-ui)$/.test(face)) return true;
           try {
-            return !!(
-              document.fonts &&
-              document.fonts.check &&
-              document.fonts.check('12px "' + face + '"')
-            );
+            const canvas = document.createElement("canvas");
+            const context = canvas.getContext("2d");
+            const sample = "가나다라마바사 ABCDEFG abcdefg 0123456789";
+            const family = JSON.stringify(face);
+            return ["monospace", "serif"].some(function (fallback) {
+              context.font = "32px " + fallback;
+              const baseline = context.measureText(sample).width;
+              context.font = "32px " + family + "," + fallback;
+              return context.measureText(sample).width !== baseline;
+            });
           } catch (e) {
             return false;
           }
@@ -1065,6 +1074,15 @@ cfb/cfb.js:
           if (sheet) sec.style.width = originalWidth;
         }
 
+        function normalizeLegacySymbols(root) {
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walker.nextNode())) {
+            // Hancom PUA white corner brackets: Unicode equivalents work without HNC fonts.
+            node.nodeValue = node.nodeValue.replace(/\u{F0854}/gu, "『").replace(/\u{F0855}/gu, "』");
+          }
+        }
+
         function reflowCellText(root) {
           // Source line breaks are retained when they fit. Missing fonts must not
           // make a cell's text paint over the neighbouring cell.
@@ -1340,6 +1358,8 @@ cfb/cfb.js:
                 used += mt;
                 tbl.style.height = ""; // 표 전체 지정높이 해제 — 분할 후 행이 그 높이로 팽창하는 것 방지
                 el.style.height = "";
+                // A source anchor minimum belongs to the unsplit object, not each fragment.
+                el.style.minHeight = "0";
                 var rows = Array.prototype.slice.call(tbl.rows);
                 var rowH = [];
                 for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].offsetHeight); // 이동 전 일괄 측정
@@ -1487,6 +1507,7 @@ cfb/cfb.js:
                 cd.remove();
             }
           }
+          normalizeLegacySymbols(root);
           reflowCellText(root);
           alignSourcePages(root);
           repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
@@ -2961,7 +2982,7 @@ cfb/cfb.js:
             binData: {},
             sectionSize: 1,
           };
-          var nbIndex = 0; // 번호/글머리 ID는 1-base 공용 인덱스
+          var numberingIndex = 0, bulletIndex = 0; // Each DocInfo collection has its own 1-based IDs.
           records(u8).forEach(function (r) {
             try {
               var b = BR(r.payload);
@@ -3027,14 +3048,15 @@ cfb/cfb.js:
                 b.skip(2);
                 info.paraShapes.push(ps);
               } else if (r.tag === T.BORDER_FILL) {
-                b.u16();
+                var borderFlags = b.u16();
                 var bf = {
+                  flags: borderFlags,
                   left: readBorder(b),
                   right: readBorder(b),
                   top: readBorder(b),
                   bottom: readBorder(b),
                 };
-                readBorder(b); // diagonal
+                bf.diagonal = readBorder(b);
                 var bg = null;
                 if (b.left() >= 4) {
                   var ff = b.u32();
@@ -3043,14 +3065,14 @@ cfb/cfb.js:
                 bf.bg = bg;
                 info.borderFills.push(bf);
               } else if (r.tag === T.BULLET) {
-                nbIndex++;
+                bulletIndex++;
                 b.u32();
                 b.u16();
                 b.u16();
                 b.i32();
-                info.bullets[nbIndex] = String.fromCharCode(b.u16());
+                info.bullets[bulletIndex] = String.fromCharCode(b.u16());
               } else if (r.tag === T.NUMBERING) {
-                nbIndex++;
+                numberingIndex++;
                 var levels = [];
                 for (var L = 0; L < 7; L++) {
                   b.u32();
@@ -3060,7 +3082,7 @@ cfb/cfb.js:
                   levels.push(b.str());
                 }
                 var start = b.left() >= 2 ? b.u16() : 1;
-                info.numberings[nbIndex] = { levels: levels, start: start || 1 };
+                info.numberings[numberingIndex] = { levels: levels, start: start || 1 };
               }
             } catch (e) {
               /* 개별 레코드 오류 무시 */
@@ -3205,6 +3227,7 @@ cfb/cfb.js:
                 // 1자리 제어문자
                 var ch = null;
                 if (code === 10) ch = "\n";
+                else if (code === 24) ch = "-";
                 else if (code === 30)
                   ch = "\u00a0"; // 묶음 빈칸
                 else if (code === 31) ch = " "; // 고정폭 빈칸
@@ -3645,6 +3668,16 @@ cfb/cfb.js:
           };
           maybeBreak();
           openLine();
+          // Markers are paragraph metadata, not characters in PARA_TEXT. Render
+          // once without shifting stored UTF-16 offsets or continuation lines.
+          var marker = headMarker(ps, ctx);
+          if (marker) {
+            var markerSpan = ctx.doc.createElement("span");
+            applyChar(markerSpan, ctx.info.charShapes[runs[0][1]], ctx);
+            markerSpan.className = "hx-marker";
+            markerSpan.textContent = marker;
+            sink.appendChild(markerSpan);
+          }
           for (var i = 0; i < para.chars.length; i++) {
             while (segIdx + 1 < para.segs.length && i >= para.segs[segIdx + 1].pos) {
               flush();
@@ -3818,6 +3851,28 @@ cfb/cfb.js:
           }
           if (bf && bf.bg !== null && bf.bg !== undefined && bf.bg !== 0xffffff)
             td.style.background = colorCss(bf.bg);
+          if (bf && bf.diagonal && bf.diagonal.stroke) {
+            const slash = (bf.flags >>> 2) & 7;
+            const backslash = (bf.flags >>> 5) & 7;
+            if (slash || backslash) {
+              const ns = "http://www.w3.org/2000/svg";
+              const svg = td.ownerDocument.createElementNS(ns, "svg");
+              svg.setAttribute("viewBox", "0 0 100 100");
+              svg.setAttribute("preserveAspectRatio", "none");
+              svg.setAttribute("aria-hidden", "true");
+              svg.classList.add("hx-cell-diagonal");
+              svg.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none";
+              const path = td.ownerDocument.createElementNS(ns, "path");
+              path.setAttribute("d", (slash ? "M0 100L100 0 " : "") + (backslash ? "M0 0L100 100" : ""));
+              path.setAttribute("fill", "none");
+              path.setAttribute("stroke", colorCss(bf.diagonal.color));
+              path.setAttribute("stroke-width", (BW_MM[bf.diagonal.width] || 0.12) * 96 / 25.4);
+              path.setAttribute("vector-effect", "non-scaling-stroke");
+              svg.appendChild(path);
+              td.style.position = "relative";
+              td.appendChild(svg);
+            }
+          }
         }
 
         function applyWrapFloat(el, blk) {
