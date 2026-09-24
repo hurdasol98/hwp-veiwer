@@ -179,3 +179,11 @@ HWP의 ID_MAPPINGS에 저장된 언어별 FACE_NAME 개수와 CHAR_SHAPE의 일�
 
 검사: `npm run test:fonts` — HWP/HWPX의 동일 혼합 언어 문서에서 글꼴 참조, 상대 크기, 자간, 원문 보존, 반복 적용 및 대체 글꼴 배지를 검증한다.
 참고: https://github.com/mete0r/pyhwp/blob/master/src/hwp5/binmodel/tagid17_id_mappings.py 및 tagid21_char_shape.py, https://github.com/mete0r/pyhwp/blob/master/src/hwp5/charsets.py.
+
+### 글꼴 등록 후 원본 재배치
+
+전용 렌더러는 현재 문서의 준비된 HWP/HWPX 데이터를 메모리에 유지한다. 글꼴만 등록한 경우 한 묶음당 한 번 원본 DOM을 다시 생성하여 줄바꿈·표 분할·쪽 배치를 다시 계산한다. 저장된 글꼴의 비동기 복원이 문서 열기보다 늦게 끝나도 같은 경로로 갱신한다. 임의 이동량이나 배율 보정은 추가하지 않는다.
+
+확대 설정과 검색어를 유지하고 검색 범위를 새 DOM으로 다시 만든다. 파싱/배치 실패는 기존 DOM으로 복귀하는 복구 가능한 오류로 표시한다. 성공하면 교체된 이미지 URL을 해제한다. 초기화는 보관한 원본을 해제하고 대기 중인 글꼴 등록의 재배치를 무효화한다. 호환 모드에서는 자동으로 전용 모드로 전환하지 않는다.
+
+검사: `npm run test:font-reflow` — 로컬 Courier 계열 FontFace를 사용하는 합성 HWP/HWPX의 실제 폭 변화와 쪽 수 재계산, 텍스트/검색 유지, 일괄 등록, 배치 실패 복귀, 초기화 경합을 검사한다. 글꼴 바이너리는 저장소에 포함하지 않는다. 이 검사는 원본 글꼴 없는 실제 문서의 완전한 시각적 일치를 보장하지 않는다.

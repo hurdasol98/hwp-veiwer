@@ -4384,9 +4384,14 @@ cfb/cfb.js:
         var zoombox = $("zoombox"); // 암묵 전역 의존 제거
         // 저장된 글꼴 자동 복원
         window.HWPViewer.FontStore.all().then(function (rows) {
-          rows.forEach(function (r) {
-            registerFont(r.name, r.buf, false).catch(function () {});
-          });
+          return Promise.all(rows.map(function (r) {
+            return registerFont(r.name, r.buf, false).then(() => true, () => false);
+          }));
+        }).then(function (loaded) {
+          if (!busy && loaded.some(Boolean)) {
+            try { refreshAfterFonts(); }
+            catch (error) { $("appStatus").textContent = "글꼴 복원 후 재배치 실패 (기존 화면 유지): " + error.message; }
+          }
         });
         var btnPdf = $("btnPdf"),
           btnReset = $("btnReset"),
@@ -4711,6 +4716,7 @@ cfb/cfb.js:
           });
           currentBinary = null;
           currentPrepared = null;
+          currentRender = null;
           zoombox.style.display = "none";
           badge.style.display = "none";
           drop.style.display = "flex";
@@ -4867,7 +4873,9 @@ cfb/cfb.js:
           }
           try {
             var info = window.HWPViewer.Hwpx.render(files, hxPage, document);
-            showPaged(info, prepared.distribution ? "HWPX · 배포용" : "HWPX");
+            const label = prepared.distribution ? "HWPX · 배포용" : "HWPX";
+            showPaged(info, label);
+            currentRender = { render: target => window.HWPViewer.Hwpx.render(files, target, document), label };
           } catch (e) {
             console.error(e);
             fail("HWPX 렌더링 실패: " + e.message, "파일 구조가 표준과 다르거나 손상됨");
@@ -4875,10 +4883,16 @@ cfb/cfb.js:
         }
 
         var currentBinary = null,
-          currentPrepared = null;
+          currentPrepared = null,
+          currentRender = null;
         function showBinary(binaryStr, badgeText = "HWP 5.0 · 전용 렌더러") {
           var info = window.HWPViewer.Hwp.render(binaryStr, hxPage, document, currentPrepared);
           showPaged(info, badgeText);
+          const prepared = currentPrepared;
+          currentRender = {
+            render: target => window.HWPViewer.Hwp.render(binaryStr, target, document, prepared),
+            label: badgeText,
+          };
           btnCompat.style.display = "inline-block";
           btnCompat.textContent = "호환 모드";
         }
@@ -4981,6 +4995,54 @@ cfb/cfb.js:
           setZoom(avail / pagePxWidth);
         }
 
+        // Reparse source: the displayed DOM may already contain split tables and
+        // wrapped cell lines, so fitting that DOM cannot undo old font geometry.
+        function refreshAfterFonts() {
+          if (!currentRender || hxScroll.style.display !== "block") return;
+          const fresh = document.createElement("div");
+          let info;
+          const previousUrls = blobUrls;
+          const previousWidth = pagePxWidth;
+          const previousScroll = hxScroll.scrollTop;
+          const query = $("searchText").value;
+          const saved = [hxPage, hxZoom, $("pageStyle"), badge].map(el => ({
+            el, style: el.getAttribute("style"),
+            text: el === badge || el === $("pageStyle") ? el.textContent : null,
+            title: el.getAttribute("title"),
+          }));
+          const previous = document.createDocumentFragment();
+          let swapped = false;
+          lineFitter.cancel();
+          try {
+            info = currentRender.render(fresh);
+            if (window.HWPViewer.Reader) window.HWPViewer.Reader.clear();
+            previous.append(...hxPage.childNodes);
+            hxPage.replaceChildren(...fresh.childNodes);
+            swapped = true;
+            showPaged(info, currentRender.label);
+            previousUrls.forEach(url => URL.revokeObjectURL(url));
+          } catch (error) {
+            if (info && info.urls) info.urls.forEach(url => URL.revokeObjectURL(url));
+            if (swapped) {
+              hxPage.replaceChildren(previous);
+              blobUrls = previousUrls;
+              pagePxWidth = previousWidth;
+              saved.forEach(({el, style, text, title}) => {
+                if (style === null) el.removeAttribute("style"); else el.setAttribute("style", style);
+                if (text !== null) el.textContent = text;
+                if (title === null) el.removeAttribute("title"); else el.setAttribute("title", title);
+              });
+              if (window.HWPViewer.Reader) window.HWPViewer.Reader.ready();
+            }
+            throw error;
+          } finally {
+            hxScroll.scrollTop = previousScroll;
+            $("searchText").value = query;
+            if (query && window.HWPViewer.Reader) window.HWPViewer.Reader.search();
+            scheduleFit();
+          }
+        }
+
         async function handleFiles(list) {
           if (busy) return;
           const selection = ++fileSelectionGeneration;
@@ -5013,9 +5075,14 @@ cfb/cfb.js:
             if (failures.length) fname.textContent += " · 글꼴 " + failures.length + "개 등록 실패";
           } else {
             // Font errors are recoverable and must not reset the current document.
-            $("appStatus").textContent = failures.length
+            let refreshError = "";
+            if (registered) {
+              try { refreshAfterFonts(); }
+              catch (error) { refreshError = " · 문서 재배치 실패 (기존 화면 유지): " + error.message; }
+            }
+            $("appStatus").textContent = (failures.length
               ? "글꼴 등록 실패 — " + failures.join(" / ")
-              : "글꼴 " + registered + "개 등록됨";
+              : "글꼴 " + registered + "개 등록됨") + refreshError;
           }
         }
 
@@ -5535,7 +5602,7 @@ cfb/cfb.js:
           $("searchCount").textContent = hits.length ? "" : "결과 없음";
           if (hits.length) move(1);
         }
-        window.HWPViewer.Reader = { clear, ready };
+        window.HWPViewer.Reader = { clear, ready, search };
         $("pageGo").onclick = () => go($("pageNumber").value);
         $("pagePrev").onclick = () => go(current);
         $("pageNext").onclick = () => go(current + 2);
