@@ -18,7 +18,7 @@ package.json과 tests/는 개발 검증에만 사용합니다.
 | hwpx-distribution | 배포용 HWPX 복호화·검사 | HWPViewer.Distribution |
 | hwpx-renderer | XML 문단·표 해석과 DOM 생성 | HWPViewer.Hwpx |
 | hwp-renderer | HWP 바이너리 해석과 DOM 생성 | HWPViewer.Hwp |
-| viewer-controller | 파일 읽기·상태·이벤트·인쇄 | HWPViewer.extractText, shortcutAllowed |
+| viewer-controller | 파일 읽기·상태·이벤트·인쇄 | HWPViewer.extractText |
 | reader-tools | 검색·쪽 이동·텍스트 다운로드 | HWPViewer.Reader |
 
 일반 script를 사용하므로 file://에서도 실행됩니다. 모듈 의존 순서를 유지하세요.
@@ -187,3 +187,7 @@ HWP의 ID_MAPPINGS에 저장된 언어별 FACE_NAME 개수와 CHAR_SHAPE의 일�
 확대 설정과 검색어를 유지하고 검색 범위를 새 DOM으로 다시 만든다. 파싱/배치 실패는 기존 DOM으로 복귀하는 복구 가능한 오류로 표시한다. 성공하면 교체된 이미지 URL을 해제한다. 초기화는 보관한 원본을 해제하고 대기 중인 글꼴 등록의 재배치를 무효화한다. 호환 모드에서는 자동으로 전용 모드로 전환하지 않는다.
 
 검사: `npm run test:font-reflow` — 로컬 Courier 계열 FontFace를 사용하는 합성 HWP/HWPX의 실제 폭 변화와 쪽 수 재계산, 텍스트/검색 유지, 일괄 등록, 배치 실패 복귀, 초기화 경합을 검사한다. 글꼴 바이너리는 저장소에 포함하지 않는다. 이 검사는 원본 글꼴 없는 실제 문서의 완전한 시각적 일치를 보장하지 않는다.
+
+### 조작 방식
+
+사용자 지정 뷰어 단축키, Ctrl+휠 배율 변경, 검색창 Enter/Escape 처리 및 숨겨진 진단 오버레이를 제거했다. 파일 열기·검색·쪽 이동·배율은 화면 컨트롤로 조작한다. 브라우저 단축키와 기본 컨트롤의 키보드 접근성은 유지한다.
