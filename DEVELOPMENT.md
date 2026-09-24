@@ -170,3 +170,12 @@ HWP BorderFill의 대각선 속성을 보존하고 셀 크기에 맞는 SVG 대�
 `npm run test:fidelity`: 독립적인 글머리 ID, 빈 문단 머리표, 제어문자/PUA, 셀 대각선 및 없는 글꼴 판별을 합성 HWP로 검사한다. 표 넘침 복구에서는 분할 전 앵커의 min-height도 해제하여 인쇄용 추가 쪽이 생기지 않게 한다.
 
 참고: https://github.com/mete0r/pyhwp/blob/master/src/hwp5/binmodel/tagid20_border_fill.py (BorderFill 구조), https://github.com/mete0r/pyhwp/blob/master/src/hwp5/binmodel/controlchar.py (제어문자), https://github.com/rkttu/hwplibsharp/releases (HNC 겹낫표 코드 포인트). 코드는 기존 프로젝트 구조에 맞춰 작성했다.
+
+### 언어별 글자 서식
+
+HWP의 ID_MAPPINGS에 저장된 언어별 FACE_NAME 개수와 CHAR_SHAPE의 일곱 참조를 사용한다. HWPX는 fontface/fontRef의 언어별 참조를 사용한다. 두 형식 모두 Typography의 공통 경로에서 한글·영문·한자·일본어·기타·기호·사용자 영역에 대응하는 글꼴, 자간, 상대 크기를 적용한다. 숫자/공백은 주변 언어 구간과 함께 처리하고, UTF-16 줄 위치 해석이 끝난 DOM 단계에서 서식 구간만 분리하므로 원문 문자열은 보존한다.
+
+대체 글꼴 표시는 실제 출력 구간의 글꼴 이름을 대상으로 공통 설치 검사를 사용한다. 원본 글꼴이 없는 상태에서 원본 표시를 보장한다는 안내는 제거했다. 장평은 여전히 CSS font-stretch에 의존하며, 모든 정적 글꼴에서 정확한 폭을 보장하지 않는다. 글자의 수직 위치, 복잡한 문자별 언어 판정, 원본 글꼴 부재에 따른 폭 차이는 남은 지원 한계다.
+
+검사: `npm run test:fonts` — HWP/HWPX의 동일 혼합 언어 문서에서 글꼴 참조, 상대 크기, 자간, 원문 보존, 반복 적용 및 대체 글꼴 배지를 검증한다.
+참고: https://github.com/mete0r/pyhwp/blob/master/src/hwp5/binmodel/tagid17_id_mappings.py 및 tagid21_char_shape.py, https://github.com/mete0r/pyhwp/blob/master/src/hwp5/charsets.py.

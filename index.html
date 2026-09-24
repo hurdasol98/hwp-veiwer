@@ -769,6 +769,10 @@ cfb/cfb.js:
         }
         function applyCharacter(span, cp) {
           if (!cp) return;
+          if (cp.languages) {
+            span.dataset.hxChar = "1";
+            span._languageStyle = cp;
+          } else if (cp.font) span.dataset.hxFont = cp.font;
           span.style.fontSize = cp.size + "pt";
           if (cp.color && cp.color !== "#000000") span.style.color = cp.color;
           if (cp.bold) span.style.fontWeight = "bold";
@@ -785,6 +789,55 @@ cfb/cfb.js:
           }
           if (cp.spacing) span.style.letterSpacing = cp.spacing / 100 + "em";
           if (cp.ratio && cp.ratio !== 100) span.style.fontStretch = cp.ratio + "%"; // 가변글꼴에서만 반영 (근사)
+        }
+
+        function languageOf(character) {
+          const code = character.codePointAt(0);
+          if (code <= 0x40 || /\p{Mark}/u.test(character)) return null;
+          if (/\p{Script=Hangul}/u.test(character)) return 0;
+          if (/\p{Script=Latin}/u.test(character)) return 1;
+          if (/\p{Script=Han}/u.test(character)) return 2;
+          if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(character)) return 3;
+          if (code >= 0x3000 && code <= 0x303f || /\p{Symbol}/u.test(character)) return 5;
+          if (code >= 0xe000 && code <= 0xf8ff || code >= 0xf0000) return 6;
+          return 4;
+        }
+        function applyLanguageStyles(root) {
+          root.querySelectorAll("[data-hx-char]").forEach(function (span) {
+            const cp = span._languageStyle;
+            if (!cp || span.dataset.languagesApplied) return;
+            span.dataset.languagesApplied = "1";
+            // Segmentation happens after source character/line offsets are consumed.
+            // Preserve every character, including surrogate pairs and neutral spaces.
+            Array.from(span.childNodes).filter(node => node.nodeType === 3).forEach(function (node) {
+              const groups = [];
+              let language = null, text = "";
+              for (const character of node.nodeValue) {
+                const next = languageOf(character);
+                if (next !== null && language !== null && next !== language) {
+                  groups.push({ language, text }); text = "";
+                }
+                if (next !== null) language = next;
+                text += character;
+              }
+              if (text) groups.push({ language: language ?? 0, text });
+              const fragment = span.ownerDocument.createDocumentFragment();
+              groups.forEach(function (group) {
+                const style = cp.languages[group.language] || cp.languages[0] || {};
+                const child = span.ownerDocument.createElement("span");
+                applyCharacter(child, { ...cp, ...style, languages: null,
+                  size: cp.size * (style.relativeSize > 0 ? style.relativeSize : 100) / 100 });
+                // Zero is meaningful: do not inherit the Hangul spacing/stretch.
+                child.style.fontWeight = cp.bold || (faceWeight(style.font) && !faceInstalled(style.font)) ? "bold" : "normal";
+                child.style.letterSpacing = (style.spacing || 0) / 100 + "em";
+                child.style.fontStretch = (style.ratio || 100) + "%";
+                child.dataset.hxLanguage = String(group.language);
+                child.textContent = group.text;
+                fragment.appendChild(child);
+              });
+              node.replaceWith(fragment);
+            });
+          });
         }
 
         function rewriteFonts(rootEl) {
@@ -809,6 +862,7 @@ cfb/cfb.js:
           faceInstalled,
           rewriteFonts,
           applyCharacter,
+          applyLanguageStyles,
         });
       })();
     </script>
@@ -1508,6 +1562,7 @@ cfb/cfb.js:
             }
           }
           normalizeLegacySymbols(root);
+          window.HWPViewer.Typography.applyLanguageStyles(root);
           reflowCellText(root);
           alignSourcePages(root);
           repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
@@ -1872,6 +1927,15 @@ cfb/cfb.js:
             if (sp) o.spacing = num(sp, "hangul", 0); // % of em
             var rt = firstByLn(cp, "ratio");
             if (rt) o.ratio = num(rt, "hangul", 100); // 장평 %
+            const relativeSize = firstByLn(cp, "relSz");
+            o.languages = ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"].map(function (lang) {
+              return {
+                font: fr ? ctx.fonts[lang.toUpperCase() + ":" + attr(fr, lang, "0")] || o.font : o.font,
+                spacing: sp ? num(sp, lang, 0) : 0,
+                ratio: rt ? num(rt, lang, 100) : 100,
+                relativeSize: relativeSize ? num(relativeSize, lang, 100) : 100,
+              };
+            });
             ctx.charPr[attr(cp, "id", "")] = o;
           });
 
@@ -2987,7 +3051,10 @@ cfb/cfb.js:
             try {
               var b = BR(r.payload);
               if (r.tag === T.DOC_PROPS) info.sectionSize = b.u16() || 1;
-              else if (r.tag === T.BIN_DATA) {
+              else if (r.tag === 17) {
+                b.u32(); // BinData count precedes seven language font counts.
+                info.fontCounts = Array.from({ length: 7 }, () => b.u32());
+              } else if (r.tag === T.BIN_DATA) {
                 var bf2 = b.u16();
                 info.binSeq = (info.binSeq || 0) + 1; // 그림 참조(picId)는 DocInfo 등장 순번(1-based)
                 if ((bf2 & 15) === 1) {
@@ -3005,11 +3072,11 @@ cfb/cfb.js:
               } else if (r.tag === T.CHAR_SHAPE) {
                 var ids = [];
                 for (var i = 0; i < 7; i++) ids.push(b.u16());
-                var ra = b.u8();
-                b.skip(6); // 장평
-                var sp = b.i8();
-                b.skip(6); // 자간
-                b.skip(14); // 상대크기·위치
+                var ratios = Array.from({ length: 7 }, () => b.u8());
+                var spacings = Array.from({ length: 7 }, () => b.i8());
+                var relativeSizes = Array.from({ length: 7 }, () => b.u8());
+                b.skip(7); // Character vertical positions are not yet rendered.
+                var ra = ratios[0], sp = spacings[0];
                 var size = b.i32() / 100;
                 var attr = b.u32();
                 b.skip(2); // 그림자 간격
@@ -3017,6 +3084,8 @@ cfb/cfb.js:
                 var ulColor = b.left() >= 4 ? b.u32() : 0;
                 info.charShapes.push({
                   fontId: ids[0],
+                  languageRefs: ids.map((fontId, i) => ({ fontId,
+                    ratio: ratios[i], spacing: spacings[i], relativeSize: relativeSizes[i] })),
                   size: Math.max(4, size),
                   spacing: sp >= -50 && sp <= 50 ? sp : 0,
                   ratio: ra >= 50 && ra <= 200 ? ra : 100,
@@ -3503,9 +3572,16 @@ cfb/cfb.js:
         function applyChar(span, cs, ctx) {
           if (!cs) return;
           const face = ctx.info.fonts[cs.fontId];
+          let offset = 0;
+          const languages = cs.languageRefs && cs.languageRefs.map(function (style, i) {
+            const font = ctx.info.fontCounts ? ctx.info.fonts[offset + style.fontId] : face;
+            offset += ctx.info.fontCounts ? ctx.info.fontCounts[i] : 0;
+            return { ...style, font: font || face };
+          });
           if (face) ctx.usedFonts[face] = true;
           window.HWPViewer.Typography.applyCharacter(span, {
             ...cs,
+            languages,
             color: cs.color ? colorCss(cs.color) : null,
             font: face,
             decorationColor:
@@ -4737,8 +4813,9 @@ cfb/cfb.js:
           var missing = [];
           try {
             if (document.fonts && document.fonts.check) {
-              (info.fonts || []).forEach(function (f) {
-                if (!document.fonts.check('12px "' + f + '"')) missing.push(f);
+              const renderedFonts = Array.from(hxPage.querySelectorAll("[data-hx-font]"), el => el.dataset.hxFont);
+              Array.from(new Set(renderedFonts.length ? renderedFonts : info.fonts || [])).forEach(function (f) {
+                if (!window.HWPViewer.Typography.faceInstalled(f)) missing.push(f);
               });
             }
           } catch (e) {}
@@ -4747,7 +4824,7 @@ cfb/cfb.js:
             badge.title =
               "미설치 글꼴(유사 글꼴로 대체 중): " +
               missing.join(", ") +
-              " — ttf 파일을 끌어넣으면 원본 표시";
+              " — 원본 글꼴 파일을 등록하면 글꼴 차이를 줄일 수 있습니다";
           } else {
             showBadge(badgeText);
             badge.title = "";
@@ -4845,7 +4922,7 @@ cfb/cfb.js:
                 var missing = [];
                 if (document.fonts && document.fonts.check) {
                   faces.forEach(function (f) {
-                    if (!document.fonts.check('12px "' + f + '"')) missing.push(f);
+                    if (!window.HWPViewer.Typography.faceInstalled(f)) missing.push(f);
                   });
                 }
                 if (missing.length) {

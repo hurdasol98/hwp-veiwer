@@ -5,7 +5,8 @@
     "test": "node tests/viewer.cjs",
     "test:simplification": "node tests/simplification.cjs",
     "test:layout": "node tests/layout.cjs",
-    "test:fidelity": "node tests/fidelity.cjs"
+    "test:fidelity": "node tests/fidelity.cjs",
+    "test:fonts": "node tests/language-fonts.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
