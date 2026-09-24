@@ -26,6 +26,19 @@ if (!args.includes('--sample') || !sample) throw new Error('Use --sample /path/t
           const zoom = r.width / card.offsetWidth, tolerance = 2 * zoom;
           const bottom = r.top + (parseFloat(card.style.minHeight) - parseFloat(css.paddingBottom)) * zoom;
           const right = r.right - parseFloat(css.paddingRight) * zoom;
+          // Check actual glyph fragments as well as tables: nowrap body text can
+          // overflow while its paragraph's CSS box remains inside the page.
+          const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walker.nextNode())) {
+            if (!node.textContent.trim()) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            for (const ink of range.getClientRects()) {
+              if (ink.width && (ink.left < r.left - tolerance || ink.right > r.right + tolerance))
+                issues.push({ page: index + 1, type: 'text outside page', text: node.textContent.slice(0, 30) });
+            }
+          }
           let previousBottom = r.top;
           for (const table of card.querySelectorAll(':scope > .hx-p > table')) {
             const b = table.getBoundingClientRect();

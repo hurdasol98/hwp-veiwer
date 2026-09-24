@@ -1132,21 +1132,24 @@ cfb/cfb.js:
           }
         }
 
-        function reflowCellText(root) {
-          // Source line breaks are retained when they fit. Missing fonts must not
-          // make a cell's text paint over the neighbouring cell.
+        function reflowOverflowingText(root) {
+          // Keep stored breaks when they fit; otherwise wrap at the actual line
+          // boundary, in both body paragraphs and cells, without scaling glyphs.
           const overflowing = [];
-          root.querySelectorAll("td .hx-seg > div").forEach(function (line) {
+          root.querySelectorAll(".hx-seg > div").forEach(function (line) {
             const cell = line.closest("td");
-            const bounds = cell.getBoundingClientRect();
+            const bounds = line.getBoundingClientRect();
+            const cellBounds = cell ? cell.getBoundingClientRect() : bounds;
             const range = document.createRange();
             range.selectNodeContents(line);
             const rect = range.getBoundingClientRect();
-            const zoom = bounds.width / cell.offsetWidth || 1;
-            if (rect.width && (rect.right > bounds.right + zoom || rect.left < bounds.left - zoom))
+            const zoom = bounds.width / line.offsetWidth || 1;
+            if (rect.width && (rect.right > Math.min(bounds.right, cellBounds.right) + zoom ||
+                rect.left < Math.max(bounds.left, cellBounds.left) - zoom))
               overflowing.push(line);
           });
           overflowing.forEach(function (line) {
+            line.dataset.reflow = "1";
             line.style.minHeight = line.style.height;
             line.style.height = "auto";
             line.style.whiteSpace = "pre-wrap";
@@ -1201,7 +1204,11 @@ cfb/cfb.js:
             const extents = units.map((unit, i) => Math.max(
               (coordinates[i].end - coordinates[i].top) * POINT_TO_PX,
               unit.scrollHeight, unit.offsetHeight));
-            const fits = complete && coordinates.every((c, i) => {
+            // Wrapped lines no longer share the stored vertical coordinates, even
+            // when the paragraph as a whole still fits before the next paragraph.
+            const hasWrappedBody = units.some(unit => unit.matches(".hx-seg") &&
+              unit.querySelector(":scope > [data-reflow]"));
+            const fits = complete && !hasWrappedBody && coordinates.every((c, i) => {
               const bottom = c.top * POINT_TO_PX + extents[i];
               const boundary = i + 1 < units.length ? coordinates[i + 1].top * POINT_TO_PX : available;
               // Text glyph ink can exceed a line box; only block extents determine collision.
@@ -1558,7 +1565,7 @@ cfb/cfb.js:
           }
           normalizeLegacySymbols(root);
           window.HWPViewer.Typography.applyLanguageStyles(root);
-          reflowCellText(root);
+          reflowOverflowingText(root);
           alignSourcePages(root);
           repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
           var cards3 = root.querySelectorAll(".hx-pagecard");
@@ -2276,25 +2283,36 @@ cfb/cfb.js:
 
         function linearRuns(p, ctx) {
           // [{ch, cs}] 선형 문자열 + 서식
-          var out = [];
+          var out = [], position = 0;
+          function emit(ch, cs, slots = 1) {
+            out.push({ ch, cs, pos: position });
+            position += slots;
+          }
           childrenByLn(p, "run").forEach(function (run) {
             var cs = ctx.charPr[attr(run, "charPrIDRef", "")];
             for (var i = 0; i < run.children.length; i++) {
               var c = run.children[i];
+              if (ln(c) === "ctrl") {
+                // Field delimiters occupy eight UTF-16 source slots, but paint no text.
+                Array.from(c.children).forEach(function (control) {
+                  if (ln(control) === "fieldBegin" || ln(control) === "fieldEnd") position += 8;
+                });
+                continue;
+              }
               if (ln(c) !== "t") continue;
               var nodes = c.childNodes;
               for (var j = 0; j < nodes.length; j++) {
                 var n = nodes[j];
                 if (n.nodeType === 3) {
                   var s = n.nodeValue;
-                  for (var k = 0; k < s.length; k++) out.push({ ch: s[k], cs: cs });
+                  for (var k = 0; k < s.length; k++) emit(s[k], cs);
                 } else if (n.nodeType === 1) {
                   var l2 = ln(n);
-                  if (l2 === "lineBreak" || l2 === "linebreak") out.push({ ch: "\n", cs: cs });
-                  else if (l2 === "tab") out.push({ ch: "\t", cs: cs });
+                  if (l2 === "lineBreak" || l2 === "linebreak") emit("\n", cs);
+                  else if (l2 === "tab") emit("\t", cs, 8);
                   else {
                     var tt = n.textContent || "";
-                    for (var k2 = 0; k2 < tt.length; k2++) out.push({ ch: tt[k2], cs: cs });
+                    for (var k2 = 0; k2 < tt.length; k2++) emit(tt[k2], cs);
                   }
                 }
               }
@@ -2406,14 +2424,14 @@ cfb/cfb.js:
           maybeBreak();
           openLine();
           for (var i = 0; i < chars.length; i++) {
-            while (segIdx + 1 < segs.length && i >= segs[segIdx + 1].pos) {
+            while (segIdx + 1 < segs.length && chars[i].pos >= segs[segIdx + 1].pos) {
               flush();
               segIdx++;
               maybeBreak();
               openLine();
             }
             var s = segs[segIdx];
-            while (subIdx + 1 < s.subs.length && i >= s.subs[subIdx + 1].pos) {
+            while (subIdx + 1 < s.subs.length && chars[i].pos >= s.subs[subIdx + 1].pos) {
               flush();
               subIdx++;
               openSub();

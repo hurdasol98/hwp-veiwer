@@ -7,7 +7,8 @@
     "test:layout": "node tests/layout.cjs",
     "test:fidelity": "node tests/fidelity.cjs",
     "test:fonts": "node tests/language-fonts.cjs",
-    "test:font-reflow": "node tests/font-reflow.cjs"
+    "test:font-reflow": "node tests/font-reflow.cjs",
+    "test:fields": "node tests/hwpx-fields.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
