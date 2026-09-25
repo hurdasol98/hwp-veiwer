@@ -200,3 +200,7 @@ HWP의 ID_MAPPINGS에 저장된 언어별 FACE_NAME 개수와 CHAR_SHAPE의 일�
 
 검사: `npm run test:fields` — 필드 시작/끝, 중첩 필드, UTF-16 서로게이트, 탭, 숨은 매개변수 제외와 본문 폭 초과 회귀. `tests/containment.cjs`는 이제 실제 글자 조각의 좌우 쪽 경계도 확인한다.
 참고: https://github.com/mete0r/pyhwp/blob/master/src/hwp5/binmodel/controlchar.py (필드·탭 제어문자 크기). 제공 HWPX의 원본 줄 위치를 제공 PDF와 대조해 검증했다.
+
+### 인라인 표와 쪽 끝의 줄 간격
+
+HWP/HWPX 인라인 표 문단의 최소 높이는 저장된 줄 본체 높이(h)를 사용한다. 다음 줄까지의 간격을 포함한 box를 쓰면 쪽 끝의 표가 실제보다 크게 판정되어 제목만 남기고 다음 쪽으로 이동할 수 있다. 뒤 문단의 위치는 기존 원본 좌표/간격 처리로 유지하고, 실제 표가 큰 경우에는 실측 분할을 계속 적용한다. `npm run test:layout`은 같은 표에 서로 다른 후행 간격을 지정해 불필요한 새 쪽이 생기지 않는지 검사한다.

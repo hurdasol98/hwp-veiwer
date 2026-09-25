@@ -2549,7 +2549,8 @@ cfb/cfb.js:
                   return pos && attr(pos, "treatAsChar", "0") === "1";
                 })
             ) {
-              div.style.minHeight = sourceSegs[0].box * PT2PX + "px";
+              // Following-line spacing is not part of the object’s minimum height.
+              div.style.minHeight = sourceSegs[0].h * PT2PX + "px";
               div.dataset.sourceLineHeight = String(sourceSegs[0].box * PT2PX);
             }
             return div;
@@ -3844,7 +3845,8 @@ cfb/cfb.js:
                 return b.inline || b.flow === 1;
               })
             ) {
-              div.style.minHeight = para.segs[0].box * PT2PX + "px";
+              // Following-line spacing is not part of the object’s minimum height.
+              div.style.minHeight = para.segs[0].h * PT2PX + "px";
               div.dataset.sourceLineHeight = String(para.segs[0].box * PT2PX);
             }
             return div;

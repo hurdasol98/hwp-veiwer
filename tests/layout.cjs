@@ -171,6 +171,19 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       results.push('PASS table splitting, merged rows, repeat headers, padding and indentation');
 
       const enc = text => new TextEncoder().encode(text);
+      for (const spacing of [0, 1500, 4500]) {
+        const xml = '<sec><p><run><secPr><pagePr width="22500" height="9000"><margin left="750" right="750" top="750" bottom="750" header="0" footer="0"/></pagePr></secPr><t>TITLE</t></run><linesegarray><lineseg textpos="0" vertpos="0" vertsize="1500" spacing="0"/></linesegarray></p>' +
+          '<p><run><tbl rowCnt="1" colCnt="1" pageBreak="TABLE"><sz width="15000" height="6000"/><pos treatAsChar="1"/><tr><tc><cellAddr rowAddr="0" colAddr="0"/><cellSpan rowSpan="1" colSpan="1"/><cellSz width="15000" height="4500"/><subList><p><run><t>CONSENT</t></run></p></subList></tc></tr></tbl></run><linesegarray><lineseg textpos="0" vertpos="1500" vertsize="6000" spacing="'+spacing+'"/></linesegarray></p></sec>';
+        const out = document.createElement('div');document.body.appendChild(out);
+        const parsed = HWPViewer.Hwpx.render({'Contents/header.xml':enc('<head/>'),'Contents/section0.xml':enc(xml)},out,document);
+        const root = out.querySelector('.hx-section');
+        HWPViewer.Layout.layoutSection(root,parsed);
+        check(root.querySelectorAll('.hx-pagecard').length === 1, 'following spacing must not push an inline table onto another page: '+spacing);
+        check(root.textContent === 'TITLECONSENT', 'keep title and table content');
+        near(parseFloat(root.querySelector('table').parentElement.style.minHeight),80,'inline minimum uses content height');
+        out.remove();
+      }
+      results.push('PASS inline table content height excludes trailing spacing');
       const xml = '<sec><p><run><secPr><pagePr width="45000" height="11250"><margin left="750" right="750" top="1500" bottom="750" header="375" footer="1125"/></pagePr></secPr><t>BODY</t></run></p></sec>';
       const out = document.createElement('div');
       const hwpxInfo = HWPViewer.Hwpx.render({ 'Contents/header.xml': enc('<head/>'), 'Contents/section0.xml': enc(xml) }, out, document);
