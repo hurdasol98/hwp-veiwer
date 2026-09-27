@@ -85,6 +85,34 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         check(card.classList.contains('hx-tall'), 'oversized content may continue in print');
         check(card.offsetHeight >= 300, 'oversized content not compressed');root.remove();
       }
+      {
+        const { root, card } = section();
+        for (let i = 0; i < 10; i++) paragraph(card, 10.4, String(i));
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.querySelectorAll('.hx-pagecard').length === 2, 'fractional heights must not round down to one page');
+        check(root.textContent === '0123456789', 'fractional pagination retains order');root.remove();
+      }
+      for (const bottom of [15, -5]) {
+        const { root, card } = section();
+        const a = paragraph(card, 40, 'A'), b = paragraph(card, 40, 'B');
+        a.style.marginBottom = bottom + 'px';b.style.marginTop = '15px';
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.querySelectorAll('.hx-pagecard').length === 1, 'adjacent positive/negative margins collapse');root.remove();
+      }
+      {
+        const { root, card } = section();
+        paragraph(card, 40, 'A').style.marginBottom = '30px';paragraph(card, 40, 'B');
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.querySelectorAll('.hx-pagecard').length === 2, 'bottom margin must contribute to next block');root.remove();
+      }
+      {
+        const { root, card } = section();
+        paragraph(card, 80, 'A').style.marginBottom = '30px';
+        paragraph(card, 30, 'B');paragraph(card, 50, 'C');
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.querySelectorAll('.hx-pagecard').length === 2, 'previous page bottom margin cannot charge the next page');
+        check(!root.querySelector('.hx-tall'), 'page-edge margin cannot cause extra print page');root.remove();
+      }
       results.push('PASS measured pagination, source spacing and indivisible overflow');
 
       function tableCase(rows, noSplit = false, repeatHeader = false) {
@@ -168,9 +196,81 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         check(table.parentElement.offsetHeight <= 100, 'unsplit anchor minimum must not survive overflow repair');
         check(!root.querySelector('.hx-tall'), 'stale minimum cannot create an extra print page');root.remove();
       }
+      for (const policy of ['0', '1', '2']) {
+        const { root, table } = tableCase([20, 1, 20]);
+        table.dataset.split = policy;
+        const cell = table.rows[1].cells[0];cell.textContent = '';cell.style.height = '';
+        const para = document.createElement('div');para.className = 'hx-p hx-seg';para.style.margin = '0';cell.appendChild(para);
+        for (let i = 0; i < 6; i++) {
+          const line = document.createElement('div');line.textContent = 'LINE' + i;
+          line.style.cssText = 'height:20px;line-height:20px;font-size:12px';para.appendChild(line);
+        }
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.textContent === 'ROW0LINE0LINE1LINE2LINE3LINE4LINE5ROW2', 'cell splitting retains text for ' + policy);
+        const first = root.querySelector('.hx-pagecard');
+        check(first.textContent.includes('LINE0') === (policy !== '2'), 'CELL splits within row; TABLE keeps rows intact');
+        if (policy === '1') {
+          check(!root.querySelector('.hx-tall'), 'CELL fragments fit page');
+          check(root.querySelectorAll('.hx-pagecard').length === 2, 'CELL uses available space');
+        }
+        if (policy === '0') check(root.querySelectorAll('.hx-pagecard').length === 1, 'NONE preserves indivisible table');
+        root.remove();
+      }
+      {
+        const { root, table } = tableCase([40, 40, 40]);
+        const wrapper = table.parentElement;wrapper.style.height = '20px';
+        wrapper.dataset.fy0 = '0';wrapper.dataset.sourceEnd = '15';
+        const after = paragraph(wrapper.parentElement, 20, 'AFTER');
+        after.dataset.y0 = '60';after.dataset.sourceEnd = '75';
+        HWPViewer.Layout.layoutSection(root, info);
+        check(!root.querySelector('[data-source-page]'), 'overflowing descendants invalidate fixed source geometry');
+        const lastTable = [...root.querySelectorAll('table')].at(-1);
+        check(after.getBoundingClientRect().top >= lastTable.getBoundingClientRect().bottom - 1, 'fixed wrapper descendants cannot overlap following text');
+        root.remove();
+      }
+      for (const cells of [1, 2]) {
+        const { root, table } = tableCase([1]);table.dataset.split = '1';
+        for (let j = 1; j < cells; j++) table.rows[0].insertCell();
+        for (const cell of table.rows[0].cells) {
+          cell.textContent = '';cell.style.cssText = 'padding:0';
+          const para = document.createElement('div');para.className = 'hx-p hx-seg';para.style.margin = '0';cell.appendChild(para);
+          for (let i = 0; i < 18; i++) {
+            const line = document.createElement('div');line.textContent = 'X';
+            line.style.cssText = 'height:20px;line-height:20px;font-size:12px';para.appendChild(line);
+          }
+        }
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.textContent === 'X'.repeat(18 * cells), 'single-row cell fragments retain all text');
+        check(root.querySelectorAll('.hx-pagecard').length === 4, 'single-row table shares CELL pagination');
+        check(!root.querySelector('.hx-tall'), 'single-row fragments stay inside pages');root.remove();
+      }
+      {
+        const { root, table } = tableCase([1]);table.dataset.split = '1';
+        const cell = table.rows[0].cells[0];cell.textContent = '';cell.style.height = '';
+        const para = document.createElement('div');para.className = 'hx-p hx-seg';
+        para.style.cssText = 'margin:0 0 30px';cell.appendChild(para);
+        for (let i = 0; i < 6; i++) {
+          const line = document.createElement('div');line.textContent = 'X';
+          line.style.cssText = 'height:20px;line-height:20px;font-size:12px';para.appendChild(line);
+        }
+        HWPViewer.Layout.layoutSection(root, info);
+        check(root.textContent === 'XXXXXX', 'cell paragraph margin split retains text');
+        check(!root.querySelector('.hx-tall'), 'split paragraph bottom margin belongs only to final fragment');
+        check(root.querySelectorAll('.hx-pagecard').length === 2, 'cell paragraph margin split page count');
+        const paragraphs = [...root.querySelectorAll('td > .hx-seg')];
+        check(paragraphs[0].style.marginBottom === '0px' && paragraphs.at(-1).style.marginBottom === '30px', 'preserve original bottom margin exactly once');root.remove();
+      }
       results.push('PASS table splitting, merged rows, repeat headers, padding and indentation');
 
       const enc = text => new TextEncoder().encode(text);
+      for (const [policy, expected] of [['NONE','0'], ['CELL','1'], ['TABLE','2']]) {
+        const xml = '<sec><p><run><tbl pageBreak="'+policy+'" repeatHeader="1" rowCnt="1" colCnt="1"><tr><tc><cellAddr rowAddr="0" colAddr="0"/><cellSpan rowSpan="1" colSpan="1"/><cellSz width="15000" height="1500"/><subList><p><run><t>HEADER</t></run></p></subList></tc></tr></tbl></run></p></sec>';
+        const out = document.createElement('div');
+        HWPViewer.Hwpx.render({'Contents/header.xml':enc('<head/>'),'Contents/section0.xml':enc(xml)},out,document);
+        const table = out.querySelector('table');
+        check(table.dataset.split === expected && table.dataset.rephdr === '1', 'preserve HWPX table policy and repeat header '+policy);
+      }
+
       for (const spacing of [0, 1500, 4500]) {
         const xml = '<sec><p><run><secPr><pagePr width="22500" height="9000"><margin left="750" right="750" top="750" bottom="750" header="0" footer="0"/></pagePr></secPr><t>TITLE</t></run><linesegarray><lineseg textpos="0" vertpos="0" vertsize="1500" spacing="0"/></linesegarray></p>' +
           '<p><run><tbl rowCnt="1" colCnt="1" pageBreak="TABLE"><sz width="15000" height="6000"/><pos treatAsChar="1"/><tr><tc><cellAddr rowAddr="0" colAddr="0"/><cellSpan rowSpan="1" colSpan="1"/><cellSz width="15000" height="4500"/><subList><p><run><t>CONSENT</t></run></p></subList></tc></tr></tbl></run><linesegarray><lineseg textpos="0" vertpos="1500" vertsize="6000" spacing="'+spacing+'"/></linesegarray></p></sec>';

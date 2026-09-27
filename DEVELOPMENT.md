@@ -204,3 +204,18 @@ HWP의 ID_MAPPINGS에 저장된 언어별 FACE_NAME 개수와 CHAR_SHAPE의 일�
 ### 인라인 표와 쪽 끝의 줄 간격
 
 HWP/HWPX 인라인 표 문단의 최소 높이는 저장된 줄 본체 높이(h)를 사용한다. 다음 줄까지의 간격을 포함한 box를 쓰면 쪽 끝의 표가 실제보다 크게 판정되어 제목만 남기고 다음 쪽으로 이동할 수 있다. 뒤 문단의 위치는 기존 원본 좌표/간격 처리로 유지하고, 실제 표가 큰 경우에는 실측 분할을 계속 적용한다. `npm run test:layout`은 같은 표에 서로 다른 후행 간격을 지정해 불필요한 새 쪽이 생기지 않는지 검사한다.
+
+
+### 실측 분할 경로와 성능 측정
+
+초기 페이지 생성은 명시된 경계만 묶고, 일반 문서와 원본 좌표 배치의 넘침은 공통 `repairOverflow`에서 분할한다. 단독 글상자도 같은 CELL 경로를 사용한다. 높이는 확대율을 제거한 소수점 경계로 측정하며, 고정 높이 상자 밖으로 나온 표/이미지 영역도 포함한다. 문단 사이의 양수·음수 여백 겹침을 계산하고, 이전 페이지 아래 여백을 새 페이지에 청구하지 않는다. 쪽 끝에는 다음 줄과의 간격을 남기지 않는다.
+
+HWPX NONE/CELL/TABLE을 각각 분할 금지/셀 안 분할/행 경계 분할로 보존한다. CELL은 병합되지 않은 행의 문단·줄 경계에서 나누며, 분할된 문단의 아래 여백은 마지막 조각만 소유한다. 요청된 제목 행을 반복하고 그 높이를 계산한다. 병합 행과 나눌 수 없는 개체는 내용 보존을 우선한다.
+
+배치 및 스타일 읽기는 DOM 이동 전에 모으고, 고정 원본 페이지는 넘침 측정에서 제외한다. `fitLines`의 정렬 검사와 공백 처리, 넘침 클래스 판정도 읽기/쓰기 단계로 분리한다. 재분할 반복 상한은 임의의 5회가 아니라 원본 분할 단위 수를 사용한다.
+
+참고한 구조: [rhwp pagination](https://github.com/edwardkim/rhwp/blob/680111ec7bea2fe11110de18c3676ba5a1cf7847/src/renderer/pagination.rs), [height_measurer](https://github.com/edwardkim/rhwp/blob/680111ec7bea2fe11110de18c3676ba5a1cf7847/src/renderer/height_measurer.rs), [table model](https://github.com/edwardkim/rhwp/blob/680111ec7bea2fe11110de18c3676ba5a1cf7847/src/model/table.rs). MIT 프로젝트의 측정/배치 분리 원칙과 표 정책을 참고했으며 Rust 코드를 복사하거나 새 런타임 의존성을 추가하지 않았다.
+
+검사: `npm run test:layout`에 소수점 누적, 문단 여백, 고정 컨테이너 안 표 넘침, CELL/TABLE/NONE 구분, 한 행·여러 셀 분할, 셀 문단 아래 여백과 HWPX 반복 제목 속성 검사를 추가했다. `node tests/performance.cjs --sample /path/to/document.hwpx --baseline /path/to/old-index.html --runs 5`로 같은 브라우저에서 현재/이전 코드를 번갈아 측정할 수 있다. 로컬 문서는 업로드하지 않는다. 별도 lint/typecheck/build 스크립트는 없으며 `npm test`가 인라인 JavaScript 구문과 독립 실행 구조를 검사한다.
+
+남은 한계: 다단 정의와 단 나눔/쪽 나눔은 아직 별개 상태로 모델링하지 않는다. 좌표 초기화를 N개씩 묶는 임시 처리는 혼합 단 문서를 깨뜨리므로 추가하지 않았다. 원본 페이지의 일부 줄만 넘쳐도 해당 페이지 전체가 흐름 배치로 바뀌는 동작, 복잡한 병합 행 분할 및 원본 글꼴이 없는 경우의 줄 폭 차이도 남아 있다. 이 변경은 모든 HWP/HWPX 문서의 원본 일치를 보장하지 않는다.

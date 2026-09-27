@@ -235,6 +235,7 @@
         box-shadow: 0 3px 16px rgba(0, 0, 0, 0.45);
         margin: 0 auto 22px;
         box-sizing: border-box;
+        contain: layout style;
       }
       .hx-p {
         min-height: 1em;
@@ -921,10 +922,10 @@ cfb/cfb.js:
         const MEASUREMENT_TOLERANCE = 1;
         // Leading spaces express indentation, not stretchable word gaps.
         // Keep the original text (including spaces) for selection/search/export.
-        function preserveLeadingSpaces(line) {
+        function preserveLeadingSpaces(line, justified) {
           if (line.dataset.leadingSpacesFixed) return;
           line.dataset.leadingSpacesFixed = "1";
-          if (getComputedStyle(line).textAlign !== "justify") return;
+          if (!justified) return;
           if (line.querySelector(':scope > span[style*="absolute"]')) return;
           const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
           const prefixes = [];
@@ -950,20 +951,24 @@ cfb/cfb.js:
 
         function fitLines(root) {
           // Keep source alignment, tab positions and character widths unchanged.
-          root.querySelectorAll(".hx-seg > div").forEach(preserveLeadingSpaces);
+          const pending = Array.from(root.querySelectorAll(".hx-seg > div"))
+            .filter(line => !line.dataset.leadingSpacesFixed)
+            .map(line => ({ line, justified: getComputedStyle(line).textAlign === "justify" }));
+          pending.forEach(({line, justified}) => preserveLeadingSpaces(line, justified));
           markOverflow(root);
         }
 
         function markOverflow(root) {
-          root.querySelectorAll(".hx-pagecard").forEach(function (card) {
+          const states = Array.from(root.querySelectorAll(".hx-pagecard"), function (card) {
             const paddingBottom = parseFloat(getComputedStyle(card).paddingBottom) || 0;
             const pageHeight = parseFloat(card.style.minHeight) || card.clientHeight;
             const bottom = Array.from(card.children).reduce(function (end, child) {
               if (getComputedStyle(child).position === "absolute") return end;
               return Math.max(end, child.offsetTop + child.offsetHeight);
             }, 0);
-            card.classList.toggle("hx-tall", bottom + paddingBottom > pageHeight + MEASUREMENT_TOLERANCE);
+            return { card, tall: bottom + paddingBottom > pageHeight + MEASUREMENT_TOLERANCE };
           });
+          states.forEach(({card, tall}) => card.classList.toggle("hx-tall", tall));
         }
         function paginate(root, contentHpx) {
           if (root.querySelector(".hx-pagecard")) return;
@@ -972,155 +977,38 @@ cfb/cfb.js:
           for (var si2 = 0; si2 < secs.length; si2++) paginateSection(secs[si2], contentHpx);
         }
 
-        function paginateSection(sec, contentHpx) {
-          var src = Array.prototype.slice.call(sec.children);
-          var sheet = sec._pageInfo,
-            originalWidth = sec.style.width;
-          // Measure pending paragraphs at the same content width they will have
-          // inside the padded sheet, not at the full paper width.
-          if (sheet) sec.style.width = (sheet.w - sheet.ml - sheet.mr) / 75 + "px";
-          var card = null,
-            used = 0,
-            hasReal = false;
-          var newCard = function () {
+        function paginateSection(sec) {
+          // Only group explicit boundaries here. All measured splitting belongs
+          // to repairOverflow, shared by flow documents and source-layout fallback.
+          const source = Array.from(sec.children), sheet = sec._pageInfo;
+          let card, hasReal = false;
+          function newCard() {
             card = document.createElement("div");
             card.className = "hx-pagecard";
             if (sheet) {
               card.style.width = sheet.w / 75 + "px";
               card.style.minHeight = sheet.h / 75 + "px";
               card.style.padding = [sheet.mt, sheet.mr, sheet.mb, sheet.ml]
-                .map(function (n) {
-                  return n / 75 + "px";
-                })
-                .join(" ");
+                .map(n => n / 75 + "px").join(" ");
               card.style.setProperty("--hx-padtop", sheet.mt / 75 + "px");
             }
             sec.appendChild(card);
-            used = 0;
             hasReal = false;
-          };
-          var markReal = function (el) {
-            if (hasReal) return;
-            if (el.querySelector && (el.querySelector("table,img") || el.textContent.trim()))
-              hasReal = true;
-          };
-          var hOf = function (el) {
-            var mt = parseFloat(getComputedStyle(el).marginTop) || 0;
-            return el.offsetHeight + mt;
-          };
+          }
           newCard();
-          for (var i = 0; i < src.length; i++) {
-            var el = src[i];
-            var h = hOf(el);
-            // 파일이 '이 문단부터 새 쪽'이라고 지정한 경우 그대로 따른다
-            if (el.dataset && el.dataset.pagebreak === "1" && hasReal) newCard();
-            var voff = el.dataset && el.dataset.voff ? parseFloat(el.dataset.voff) : null;
+          source.forEach(function (el) {
+            if (el.dataset.pagebreak === "1" && hasReal) newCard();
+            const voff = el.dataset.voff === undefined ? null : Number(el.dataset.voff);
             if (voff !== null) {
-              // 페이지 기준 절대배치: 흐름과 무관하게 카드에 부유
-              // 이 쪽에 이미 다른 개체가 같은 자리에 있으면 새 쪽에서 시작 (표지가 앞 쪽에 겹쳐 얹히는 것 방지)
-              if (hasReal && voff <= (card.__lastVoff != null ? card.__lastVoff : -1)) newCard();
+              if (hasReal && voff <= (card.__lastVoff ?? -1)) newCard();
               card.__lastVoff = voff;
               card.style.position = "relative";
-              el.style.position = "absolute";
-              el.style.left = "0";
-              el.style.right = "0";
-              el.style.marginTop = "0";
-              card.appendChild(el);
-              // Keep the document's anchor even when the object exceeds the page.
-              el.style.top = "calc(" + voff + "px + var(--hx-padtop, 0px))";
-              markReal(el);
-              continue;
+              Object.assign(el.style, { position: "absolute", left: "0", right: "0", marginTop: "0",
+                top: "calc(" + voff + "px + var(--hx-padtop, 0px))" });
             }
-            // A blank paragraph can carry intentional source spacing (e.g. covers).
-            // Do not discard that space merely because it exceeds an arbitrary size.
-            if (h <= contentHpx - used + 0.5) {
-              card.appendChild(el);
-              used += h;
-              markReal(el);
-              continue;
-            }
-            if (el.classList.contains("hx-seg") && el.children.length > 1) {
-              // 줄 단위 분할: 들어가는 만큼 채우고 잔여는 새 카드의 복제 컨테이너로
-              var mt0 = parseFloat(getComputedStyle(el).marginTop) || 0;
-              card.appendChild(el);
-              used += mt0;
-              var lines = Array.prototype.slice.call(el.children);
-              var cont = el;
-              for (var li = 0; li < lines.length; li++) {
-                var lh = lines[li].offsetHeight;
-                if (lh > contentHpx - used + 0.5 && cont.children.length) {
-                  newCard();
-                  var c2 = document.createElement("div");
-                  c2.className = el.className;
-                  c2.style.cssText = el.style.cssText;
-                  c2.style.marginTop = "0";
-                  card.appendChild(c2);
-                  cont = c2;
-                }
-                cont.appendChild(lines[li]);
-                used += lh;
-              }
-            } else {
-              var tblPre = el.querySelector && el.querySelector("table");
-              var canSplitHere =
-                tblPre &&
-                tblPre.getAttribute("data-split") !== "0" &&
-                tblPre.rows.length > 1;
-              if (hasReal && !canSplitHere) newCard();
-              var tbl = el.querySelector && el.querySelector("table");
-              // 남은 자리에 안 들어가는 표는 통째로 넘기지 말고 행 단위로 나눠 이번 쪽부터 채운다.
-              // (원본 한글도 그렇게 배치한다. 통째로 넘기면 앞 쪽이 크게 비어 보임)
-              var splitOK = tbl && tbl.getAttribute("data-split") !== "0" && tbl.rows.length > 1;
-              if (splitOK) {
-                // 행 단위 분할 (병합 없고 파일이 나눔을 허용한 표만)
-                tbl.style.height = "";
-                el.style.height = "";
-                card.appendChild(el);
-                used += hOf(el) - tbl.offsetHeight;
-                var rows = Array.prototype.slice.call(tbl.rows);
-                var rowH = [];
-                for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].offsetHeight); // 이동 전 일괄 측정
-                // 병합이 걸쳐 있는 행에서는 자를 수 없다 → 병합이 열려 있지 않은 행만 분할점
-                var safeR = new Array(rows.length).fill(true),
-                  openTo = 0;
-                for (var sr2 = 0; sr2 < rows.length; sr2++) {
-                  if (sr2 < openTo) safeR[sr2] = false;
-                  var cls2 = rows[sr2].cells;
-                  for (var sc2 = 0; sc2 < cls2.length; sc2++) {
-                    var rs2 = parseInt(cls2[sc2].getAttribute("rowspan") || "1", 10) || 1;
-                    if (sr2 + rs2 > openTo) openTo = sr2 + rs2;
-                  }
-                }
-                var shell = tbl;
-                for (var ri2 = 0; ri2 < rows.length; ri2++) {
-                  var rh = rowH[ri2];
-                  // 이 행을 넣으면 쪽을 넘는가? 넘는다면 '이번 행이 안전점일 때' 여기서 끊는다.
-                  // (예전에는 행 자체가 쪽보다 클 때만 끊어서, 큰 행 앞에서 못 끊고 통째로 넘쳤다)
-                  if (used + rh > contentHpx + MEASUREMENT_TOLERANCE && used > 0 && safeR[ri2]) {
-                    newCard();
-                    var t2 = tbl.cloneNode(false);
-                    t2.style.cssText = tbl.style.cssText;
-                    var cg = tbl.querySelector("colgroup");
-                    if (cg) t2.appendChild(cg.cloneNode(true));
-                    var w2 = document.createElement("div");
-                    w2.className = el.className;
-                    w2.style.cssText = el.style.cssText;
-                    w2.style.marginTop = "0";
-                    w2.appendChild(t2);
-                    card.appendChild(w2);
-                    shell = t2;
-                  }
-                  (shell.tBodies[0] || shell).appendChild(rows[ri2]);
-                  used += rh;
-                }
-              } else {
-                card.appendChild(el);
-                used += h;
-              }
-              markReal(el);
-            }
-          }
-          if (sheet) sec.style.width = originalWidth;
+            card.appendChild(el);
+            hasReal ||= !!(el.textContent.trim() || el.querySelector("table,img"));
+          });
         }
 
         function normalizeLegacySymbols(root) {
@@ -1177,9 +1065,10 @@ cfb/cfb.js:
         // A complete source page owns its geometry. Browser font metrics must not
         // move subsequent paragraphs or change its page count.
         function alignSourcePages(root) {
-          root.querySelectorAll(".hx-pagecard").forEach(function (card) {
-            const units = Array.from(card.children).filter(unit =>
-              !unit.matches(".hx-runhead,.hx-runfoot"));
+          const cards = Array.from(root.querySelectorAll(".hx-pagecard"));
+          const plans = cards.map(card => ({ card, units: Array.from(card.children).filter(unit =>
+            !unit.matches(".hx-runhead,.hx-runfoot")) }));
+          plans.forEach(function ({card, units}) {
             const geometryKeys = ["position", "top", "left", "right", "marginTop", "marginBottom", "height"];
             function restoreGeometry(el) {
               if (el._flowGeometry) geometryKeys.forEach(key => el.style[key] = el._flowGeometry[key]);
@@ -1189,6 +1078,9 @@ cfb/cfb.js:
               unit.querySelectorAll(":scope > [data-line-y]").forEach(restoreGeometry);
             });
             delete card.dataset.sourcePage;
+          });
+          plans.forEach(function (plan) {
+            const {card, units} = plan;
             const coordinates = units.map(function (unit) {
               const raw = unit.dataset.y0 ?? unit.dataset.fy0;
               return { top: Number(raw), end: Number(unit.dataset.sourceEnd),
@@ -1201,9 +1093,15 @@ cfb/cfb.js:
               parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom);
             // An object's anchor line does not describe the full table extent.
             // Only preserve fixed geometry when actual content fits without overlap.
+            const zoom = card.getBoundingClientRect().width / parseFloat(padding.width) || 1;
+            const heights = units.map(unit => {
+              const boxHeight = unit.getBoundingClientRect().height / zoom;
+              return unit.querySelector("table,img,.hx-shape") && unit.scrollHeight > Math.ceil(boxHeight)
+                ? unit.scrollHeight : boxHeight;
+            });
             const extents = units.map((unit, i) => Math.max(
               (coordinates[i].end - coordinates[i].top) * POINT_TO_PX,
-              unit.scrollHeight, unit.offsetHeight));
+              heights[i]));
             // Wrapped lines no longer share the stored vertical coordinates, even
             // when the paragraph as a whole still fits before the next paragraph.
             const hasWrappedBody = units.some(unit => unit.matches(".hx-seg") &&
@@ -1215,6 +1113,11 @@ cfb/cfb.js:
               const end = units[i].querySelector("table,img,.hx-shape") ? bottom : c.end * POINT_TO_PX;
               return end <= boundary + MEASUREMENT_TOLERANCE;
             });
+            Object.assign(plan, {coordinates, padding: {paddingTop: padding.paddingTop,
+              paddingLeft: padding.paddingLeft, paddingRight: padding.paddingRight}, heights, fits});
+          });
+          plans.forEach(function ({card, units, coordinates, padding, heights, fits}) {
+            const geometryKeys = ["position", "top", "left", "right", "marginTop", "marginBottom", "height"];
             if (!fits) {
               // Preserve source gaps when possible, while keeping overflowing objects
               // in normal flow so row/line pagination can carry them onto another page.
@@ -1224,8 +1127,8 @@ cfb/cfb.js:
                 if (Number.isFinite(c.top)) {
                   const gap = Math.max(0, c.top * POINT_TO_PX - previousEnd);
                   unit.style.marginTop = gap + "px";
-                  previousEnd = Math.max(previousEnd, c.top * POINT_TO_PX) + unit.offsetHeight;
-                } else previousEnd += unit.offsetHeight;
+                  previousEnd = Math.max(previousEnd, c.top * POINT_TO_PX) + heights[i];
+                } else previousEnd += heights[i];
               });
               return;
             }
@@ -1255,7 +1158,10 @@ cfb/cfb.js:
         // 실제 본문 높이를 넘으면 원래 크기를 유지하며 다음 쪽으로 이어붙임
         // 분할로 새로 생긴 카드도 다시 검사해야 하므로 여러 번 반복 (더 나눌 것이 없으면 종료)
         function repairOverflow(root, contentHpx) {
-          for (var pass = 0; pass < 5; pass++) {
+          // Each useful pass must create a new fragment. Bound work by actual
+          // source units instead of silently stopping after five pages of repair.
+          const maxPasses = root.querySelectorAll(".hx-p,tr,.hx-seg > div").length + 1;
+          for (var pass = 0; pass < maxPasses; pass++) {
             var before = root.querySelectorAll(".hx-pagecard").length;
             repairOverflowPass(root, contentHpx);
             if (root.querySelectorAll(".hx-pagecard").length === before) break;
@@ -1265,6 +1171,78 @@ cfb/cfb.js:
         function repairOverflowPass(root, contentHpx) {
           // 문서에 섹션이 여러 개면 첫 섹션만 보면 안 된다 (나머지 쪽이 통째로 검사에서 빠짐)
           var cards = Array.prototype.slice.call(root.querySelectorAll(".hx-pagecard"));
+          // Snapshot before moving nodes: fractional geometry avoids cumulative
+          // integer rounding, and a moved line must not trigger another layout read.
+          const rootWidth = parseFloat(getComputedStyle(root).width);
+          const scale = rootWidth ? root.getBoundingClientRect().width / rootWidth : 1;
+          const measured = new Map();
+          const candidates = new Set();
+          cards.filter(card => card.dataset.sourcePage !== "1").forEach(card => {
+            card.querySelectorAll(".hx-p,.hx-seg > div,td > *").forEach(el => candidates.add(el));
+            Array.from(card.children).forEach(el => candidates.add(el));
+          });
+          candidates.forEach(el => {
+            const css = getComputedStyle(el);
+            const boxHeight = el.getBoundingClientRect().height / (scale || 1);
+            const contentHeight = el.querySelector("table,img,.hx-shape") && el.scrollHeight > Math.ceil(boxHeight)
+              ? el.scrollHeight : boxHeight;
+            measured.set(el, {height: contentHeight,
+              top: parseFloat(css.marginTop) || 0, bottom: parseFloat(css.marginBottom) || 0});
+          });
+          const height = el => measured.get(el)?.height ?? el.getBoundingClientRect().height / (scale || 1);
+          const margins = el => measured.get(el) || {top: 0, bottom: 0};
+          const collapse = (a, b) => Math.max(0, a, b) + Math.min(0, a, b);
+          // CELL policy permits a row to continue at paragraph/line boundaries.
+          // Plan every cell first; merged rows and indivisible content stay intact.
+          function splitCellRow(row, available) {
+            if (available <= 0 || Array.from(row.cells).some(cell => cell.rowSpan > 1)) return null;
+            const plans = Array.from(row.cells, cell => {
+              const css = getComputedStyle(cell);
+              const overhead = [css.paddingTop, css.paddingBottom, css.borderTopWidth, css.borderBottomWidth]
+                .reduce((sum, value) => sum + (parseFloat(value) || 0), 0);
+              const units = Array.from(cell.children).flatMap(para =>
+                para.matches(".hx-seg") ? Array.from(para.children, (line, i) => ({node: line, para,
+                  height: height(line), top: i === 0 ? margins(para).top : 0,
+                  bottom: i === para.children.length - 1 ? margins(para).bottom : 0})) :
+                  [{node: para, para: null, height: height(para), ...margins(para)}]);
+              let used = overhead, cut = 0, bottom = 0;
+              while (cut < units.length) {
+                const unit = units[cut], next = used + collapse(bottom, unit.top) + unit.height;
+                if (next + unit.bottom > available + MEASUREMENT_TOLERANCE) break;
+                used = next; bottom = unit.bottom; cut++;
+              }
+              return {cell, units, cut};
+            });
+            if (!plans.some(p => p.cut > 0) || !plans.some(p => p.cut < p.units.length)) return null;
+            const tail = row.cloneNode(false);
+            plans.forEach(({cell, units, cut}) => {
+              const next = cell.cloneNode(false);
+              cell.style.height = next.style.height = "";
+              cell.style.minHeight = next.style.minHeight = "0";
+              const hosts = new Map();
+              units.slice(cut).forEach(({node, para}) => {
+                if (!para) next.appendChild(node);
+                else {
+                  let host = hosts.get(para);
+                  if (!host) {
+                    host = para.cloneNode(false);
+                    if (units.slice(0, cut).some(unit => unit.para === para)) {
+                      host.style.marginTop = "0";
+                      para.style.marginBottom = "0";
+                    }
+                    host.style.height = para.style.height = "";
+                    host.style.minHeight = para.style.minHeight = "0";
+                    next.appendChild(host); hosts.set(para, host);
+                  }
+                  host.appendChild(node);
+                  if (!para.children.length) para.remove();
+                }
+              });
+              tail.appendChild(next);
+            });
+            row.after(tail);
+            return tail;
+          }
           var limit = contentHpx + MEASUREMENT_TOLERANCE;
           var mk = function (ref) {
             var c = document.createElement("div");
@@ -1278,31 +1256,32 @@ cfb/cfb.js:
             var card = cards[ci];
             if (card.dataset.sourcePage === "1") continue;
             // 카드 높이는 A4 최소높이에 가려지므로 '자식 높이 합'으로 실제 내용량을 잰다
-            var sumH = 0;
+            var sumH = 0, previousBottom = 0;
             for (var sm = 0; sm < card.children.length; sm++) {
               var kdS = card.children[sm];
               if (kdS.style && kdS.style.position === "absolute") continue;
-              sumH += kdS.offsetHeight + (parseFloat(getComputedStyle(kdS).marginTop) || 0);
+              sumH += height(kdS) + collapse(previousBottom, margins(kdS).top);
+              previousBottom = margins(kdS).bottom;
             }
             if (sumH <= limit) continue;
             var units = Array.prototype.slice.call(card.children);
             var target = card,
-              used = 0,
-              guard = 0;
+              used = 0, pendingBottom = 0;
             for (var ui = 0; ui < units.length; ui++) {
               var el = units[ui];
               if (el.style && el.style.position === "absolute") continue; // 페이지 고정 개체는 그대로
-              var mt = parseFloat(getComputedStyle(el).marginTop) || 0;
-              var h = el.offsetHeight + mt;
+              var mt = collapse(pendingBottom, margins(el).top), mb = margins(el).bottom;
+              var h = height(el) + mt;
               if (used + h <= limit) {
                 if (target !== card) target.appendChild(el);
                 used += h;
+                pendingBottom = mb;
                 continue;
               }
               var tbl = el.querySelector && el.querySelector("table");
               // 분할 가능 행 경계: 해당 행 시작 시점에 '열려 있는 rowspan'이 없는 곳
               var safeRow = null;
-              if (tbl && tbl.rows.length > 1) {
+              if (tbl && tbl.rows.length) {
                 safeRow = new Array(tbl.rows.length + 1).fill(true);
                 var openUntil = 0;
                 for (var sr = 0; sr < tbl.rows.length; sr++) {
@@ -1315,100 +1294,8 @@ cfb/cfb.js:
                 }
               }
               var splitAllowed = !tbl || tbl.getAttribute("data-split") !== "0"; // 원본이 '쪽 나눔 없음'이면 쪼개지 않음
-              var tallCell = null;
-              if (tbl && splitAllowed && tbl.rows.length === 1 && tbl.rows[0].cells.length === 1) {
-                // 한 쪽보다 큰 1행 글상자: 셀 안 내용을 줄 단위로 나눠 여러 쪽에 흘림
-                for (var tc = 0; tc < tbl.rows.length; tc++) {
-                  var cellT = tbl.rows[tc].cells[0];
-                  if (cellT && cellT.offsetHeight > contentHpx) {
-                    tallCell = cellT;
-                    break;
-                  }
-                }
-              }
-              if (tallCell) {
-                if (target !== card) target.appendChild(el);
-                used += mt;
-                tbl.style.height = "";
-                el.style.height = "";
-                tallCell.style.height = "";
-                // 셀 내부의 배치 단위(문단) 목록을 만들되, 문단이 크면 줄 단위로 펼침
-                var cellUnits = [];
-                var kidsT = Array.prototype.slice.call(tallCell.children);
-                for (var ku = 0; ku < kidsT.length; ku++) {
-                  var kd = kidsT[ku];
-                  if (
-                    kd.classList &&
-                    kd.classList.contains("hx-seg") &&
-                    kd.children.length > 1
-                  )
-                    cellUnits.push({ para: kd, lines: Array.prototype.slice.call(kd.children) });
-                  else cellUnits.push({ para: kd, lines: null });
-                }
-                var curCell = tallCell,
-                  curTbl = tbl,
-                  curWrap = el,
-                  guardT = 0;
-                var lockW = tbl.offsetWidth,
-                  lockCW = tallCell.offsetWidth; // 분할 후에도 원래 폭 유지
-                var newPage = function () {
-                  target = mk(target);
-                  used = 0;
-                  var t3 = curTbl.cloneNode(false);
-                  t3.style.cssText = curTbl.style.cssText;
-                  t3.style.height = "";
-                  t3.style.width = lockW + "px";
-                  t3.style.tableLayout = "fixed";
-                  var cg3 = curTbl.querySelector("colgroup");
-                  if (cg3) t3.appendChild(cg3.cloneNode(true));
-                  var tb3 = document.createElement("tbody");
-                  var tr3 = document.createElement("tr");
-                  var td3 = curCell.cloneNode(false);
-                  td3.style.height = "";
-                  td3.style.width = lockCW + "px";
-                  tr3.appendChild(td3);
-                  tb3.appendChild(tr3);
-                  t3.appendChild(tb3);
-                  var w3 = document.createElement("div");
-                  w3.className = curWrap.className;
-                  w3.style.cssText = curWrap.style.cssText;
-                  w3.style.marginTop = "0";
-                  w3.style.height = "";
-                  w3.appendChild(t3);
-                  target.appendChild(w3);
-                  curTbl = t3;
-                  curCell = td3;
-                  curWrap = w3;
-                };
-                for (var ui2 = 0; ui2 < cellUnits.length && guardT++ < 900; ui2++) {
-                  var un = cellUnits[ui2];
-                  if (!un.lines) {
-                    var uh = un.para.offsetHeight;
-                    if (used + uh > limit && used > 0) newPage();
-                    curCell.appendChild(un.para);
-                    used += un.para.offsetHeight;
-                  } else {
-                    var host = un.para;
-                    if (host.parentNode !== curCell) curCell.appendChild(host);
-                    for (var li2 = 0; li2 < un.lines.length; li2++) {
-                      var lnH = un.lines[li2].offsetHeight;
-                      if (used + lnH > limit && used > 0) {
-                        newPage();
-                        host = document.createElement("div");
-                        host.className = un.para.className;
-                        host.style.cssText = un.para.style.cssText;
-                        host.style.marginTop = "0";
-                        curCell.appendChild(host);
-                      }
-                      host.appendChild(un.lines[li2]);
-                      used += lnH;
-                    }
-                  }
-                }
-                if (++guard > 600) break;
-                continue;
-              }
-              var splittable = tbl && splitAllowed && tbl.rows.length > 1;
+              var splittable = tbl && splitAllowed &&
+                (tbl.rows.length > 1 || (tbl.rows.length === 1 && tbl.getAttribute("data-split") === "1"));
               if (splittable) {
                 if (target !== card) target.appendChild(el);
                 used += mt;
@@ -1418,7 +1305,7 @@ cfb/cfb.js:
                 el.style.minHeight = "0";
                 var rows = Array.prototype.slice.call(tbl.rows);
                 var rowH = [];
-                for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].offsetHeight); // 이동 전 일괄 측정
+                for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].getBoundingClientRect().height / (scale || 1)); // 이동 전 일괄 측정
                 // Keep a repeated heading with its first data row. Measure merged
                 // row groups before deciding whether they fit in the remaining space.
                 if (tbl.getAttribute("data-rephdr") === "1") safeRow[1] = false;
@@ -1427,6 +1314,18 @@ cfb/cfb.js:
                   if (!safeRow[rg + 1]) groupH[rg] += groupH[rg + 1];
                 var shell = tbl;
                 for (var ri = 0; ri < rows.length; ri++) {
+                  if (tbl.getAttribute("data-split") === "1" && safeRow[ri] && safeRow[ri + 1] &&
+                      used + groupH[ri] > limit) {
+                    const tail = splitCellRow(rows[ri], contentHpx - used);
+                    if (tail) {
+                      const firstHeight = rows[ri].getBoundingClientRect().height / (scale || 1);
+                      const tailHeight = tail.getBoundingClientRect().height / (scale || 1);
+                      rows.splice(ri + 1, 0, tail);
+                      rowH.splice(ri, 1, firstHeight, tailHeight);
+                      groupH.splice(ri, 1, firstHeight, tailHeight);
+                      safeRow.splice(ri + 1, 0, true);
+                    }
+                  }
                   var rh = rowH[ri];
                   if (
                     used + groupH[ri] > limit &&
@@ -1458,6 +1357,7 @@ cfb/cfb.js:
                   (shell.tBodies[0] || shell).appendChild(rows[ri]);
                   used += rh;
                 }
+                pendingBottom = mb;
               } else if (
                 el.classList &&
                 el.classList.contains("hx-seg") &&
@@ -1471,7 +1371,7 @@ cfb/cfb.js:
                 var lines = Array.prototype.slice.call(el.children);
                 var cont = el;
                 for (var li = 0; li < lines.length; li++) {
-                  var lh = lines[li].offsetHeight;
+                  var lh = height(lines[li]);
                   if (used + lh > limit && used > 0) {
                     target = mk(target);
                     used = 0;
@@ -1484,17 +1384,28 @@ cfb/cfb.js:
                   cont.appendChild(lines[li]);
                   used += lh;
                 }
+                pendingBottom = mb;
               } else {
                 // Keep indivisible oversized content without adding empty pages.
                 if (used > 0) {
                   target = mk(target);
                   used = 0;
+                  h = height(el) + margins(el).top;
                 }
                 target.appendChild(el);
                 used += h;
+                pendingBottom = mb;
               }
             }
           }
+        }
+
+        function trimTrailingLineSpacing(card) {
+          const tail = card.lastElementChild;
+          if (tail) tail.style.marginBottom = "0";
+          const line = tail?.matches(".hx-seg") ? tail.lastElementChild : null;
+          if (line && parseFloat(line.style.height) > parseFloat(line.style.lineHeight))
+            line.style.height = line.style.lineHeight;
         }
 
         function layoutSection(root, info) {
@@ -1563,6 +1474,9 @@ cfb/cfb.js:
                 cd.remove();
             }
           }
+          // The final stored line has no following line on this source page.
+          // Keep its content height, not its trailing inter-line spacing.
+          root.querySelectorAll(".hx-pagecard").forEach(trimTrailingLineSpacing);
           normalizeLegacySymbols(root);
           window.HWPViewer.Typography.applyLanguageStyles(root);
           reflowOverflowingText(root);
@@ -1570,6 +1484,7 @@ cfb/cfb.js:
           repairOverflow(root, (pi.h - pi.mt - pi.mb) * info.U2PX);
           var cards3 = root.querySelectorAll(".hx-pagecard");
           for (var c3 = 0; c3 < cards3.length; c3++) {
+            trimTrailingLineSpacing(cards3[c3]);
             cards3[c3].style.width = pagePxWidth + "px";
             cards3[c3].style.minHeight = pi.h * info.U2PX + "px";
             cards3[c3].style.padding = padCss;
@@ -2068,7 +1983,8 @@ cfb/cfb.js:
               .join(" ");
           // 쪽 나눔 지정: NONE=나누지 않음 / TABLE·CELL=나눌 수 있음 (셸의 분할 판단에 쓰임)
           var pbAttr = String(attr(tbl, "pageBreak", "CELL")).toUpperCase();
-          table.setAttribute("data-split", pbAttr === "NONE" ? "0" : "2");
+          table.setAttribute("data-split", pbAttr === "NONE" ? "0" : pbAttr === "CELL" ? "1" : "2");
+          if (attr(tbl, "repeatHeader", "0") === "1") table.setAttribute("data-rephdr", "1");
           var tblBf = ctx.borderFill[attr(tbl, "borderFillIDRef", "")];
           // 열 너비 확정 (L8): cellAddr/cellSpan/cellSz 기반 colgroup
           (function () {
