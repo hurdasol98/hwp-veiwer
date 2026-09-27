@@ -692,6 +692,29 @@ cfb/cfb.js:
     <script id="viewer-core">
       /* Shared services. Dependency order is documented in DEVELOPMENT.md. */
       window.HWPViewer = {};
+      // Format-independent semantics. Parsers supply HWP units; layout resolves
+      // physical page parity only after all measured fragments are known.
+      window.HWPViewer.DocumentModel = Object.freeze({
+        bool(value) { return value === true || value === 1 || value === "1" || value === "true"; },
+        breaks(flags) {
+          return { section: !!(flags & 1), columnDefinition: !!(flags & 2),
+            page: !!(flags & 4), column: !!(flags & 8) };
+        },
+        paper(raw) {
+          return Object.freeze({ ...raw,
+            w: raw.landscape ? raw.h : raw.w, h: raw.landscape ? raw.w : raw.h,
+            ml: raw.ml + (raw.gutter || 0), mr: raw.mr,
+            mt: raw.mt + (raw.headerHeight || 0), mb: raw.mb + (raw.footerHeight || 0) });
+        },
+        insets(paper, pageNumber) {
+          return paper.binding === 1 && pageNumber % 2 === 0
+            ? { mt: paper.mt, mr: paper.ml, mb: paper.mb, ml: paper.mr }
+            : { mt: paper.mt, mr: paper.mr, mb: paper.mb, ml: paper.ml };
+        },
+        appliesToPage(apply, pageNumber) {
+          return apply === 1 ? pageNumber % 2 === 0 : apply === 2 ? pageNumber % 2 === 1 : true;
+        },
+      });
       window.HWPViewer.Typography = (function () {
         "use strict";
         var FONT_MAP = {
@@ -1056,6 +1079,14 @@ cfb/cfb.js:
           let lastY = null;
           return {
             cur: currentPage,
+            beforeParagraph(breaks, y) {
+              if (currentPage()?.childNodes.length &&
+                  (breaks.page || breaks.column || (y !== null && lastY !== null && y < lastY))) {
+                lastY = null;
+                return openPage();
+              }
+              return currentPage();
+            },
             shouldBreak(y) { return lastY !== null && y < lastY; },
             mark(y) { lastY = y; },
             page() { lastY = null; return openPage(); },
@@ -1526,55 +1557,51 @@ cfb/cfb.js:
                 cdF.remove();
             }
           }
-          // 머리말·꼬리말: 각 쪽 여백 영역에 복제 배치 (한글은 쪽마다 반복해 인쇄)
-          var hdSrc = root.querySelector(".hx-headersrc");
-          var ftSrc = root.querySelector(".hx-footersrc");
-          if (hdSrc || ftSrc) {
-            var cardsHF = root.querySelectorAll(".hx-pagecard");
-            var headerTopPx = (pi.mt - (pi.headerHeight || 0)) * info.U2PX,
-              footerTopPx = (pi.h - pi.mb) * info.U2PX;
-            var sideL = pi.ml * info.U2PX,
-              sideR = pi.mr * info.U2PX;
-            for (var hi = 0; hi < cardsHF.length; hi++) {
-              var cardHF = cardsHF[hi];
-              if (cardHF.querySelector(".hx-runhead")) continue; // 재배치 시 중복 방지
-              if (hdSrc) {
-                var hCopy = hdSrc.cloneNode(true);
-                hCopy.className = "hx-runhead";
-                hCopy.style.cssText =
-                  "display:block;position:absolute;left:" +
-                  sideL +
-                  "px;right:" +
-                  sideR +
-                  "px;top:" +
-                  headerTopPx +
-                  "px;overflow:hidden;";
-                cardHF.appendChild(hCopy);
-              }
-              if (ftSrc) {
-                var fCopy = ftSrc.cloneNode(true);
-                fCopy.className = "hx-runfoot";
-                fCopy.style.cssText =
-                  "display:block;position:absolute;left:" +
-                  sideL +
-                  "px;right:" +
-                  sideR +
-                  "px;top:" +
-                  footerTopPx +
-                  "px;overflow:hidden;";
-                cardHF.appendChild(fCopy);
-              }
-              if (getComputedStyle(cardHF).position === "static")
-                cardHF.style.position = "relative";
-            }
-            if (hdSrc) hdSrc.remove();
-            if (ftSrc) ftSrc.remove();
-          }
+          const model = window.HWPViewer.DocumentModel;
+          const headerSources = Array.from(root.querySelectorAll(":scope > .hx-headersrc"));
+          const footerSources = Array.from(root.querySelectorAll(":scope > .hx-footersrc"));
+          const physicalCards = Array.from(root.querySelectorAll(".hx-pagecard"));
+          physicalCards.forEach(function (card, index) {
+            const pageNumber = (info.pageOffset || 0) + index + 1;
+            const insets = model.insets(pi, pageNumber);
+            const padding = [insets.mt, insets.mr, insets.mb, insets.ml]
+              .map(n => n * info.U2PX + "px").join(" ");
+            card.style.padding = padding;
+            card.style.setProperty("--hx-print-padding", padding);
+            if (card.dataset.sourcePage === "1") Array.from(card.children).forEach(unit => {
+              if (unit.matches(".hx-runhead,.hx-runfoot")) return;
+              unit.style.left = insets.ml * info.U2PX + "px";
+              unit.style.right = insets.mr * info.U2PX + "px";
+            });
+            [[headerSources, "hx-runhead", pi.mt - (pi.headerHeight || 0)],
+             [footerSources, "hx-runfoot", pi.h - pi.mb]].forEach(function ([sources, name, top]) {
+              if (!sources.length) return;
+              card.querySelectorAll(":scope > ." + name).forEach(el => el.remove());
+              const source = sources.filter(el => {
+                const start = el._runningAnchor?.closest(".hx-pagecard");
+                return (!start || physicalCards.indexOf(start) <= index) &&
+                  model.appliesToPage(Number(el.dataset.apply) || 0, pageNumber);
+              }).at(-1);
+              if (!source) return;
+              const copy = source.cloneNode(true);
+              copy.className = name;
+              copy.style.cssText = "display:block;position:absolute;left:" + insets.ml * info.U2PX +
+                "px;right:" + insets.mr * info.U2PX + "px;top:" + top * info.U2PX + "px;overflow:hidden";
+              card.appendChild(copy);
+            });
+          });
+          headerSources.concat(footerSources).forEach(el => el.remove());
           markOverflow(root);
           // 쪽 번호: 카드 속성으로만 표기 (별도 노드 금지 — 인쇄 페이지 분절을 교란함)
           var cardsN = root.querySelectorAll(".hx-pagecard");
           for (var cn = 0; cn < cardsN.length; cn++)
             cardsN[cn].setAttribute("data-pg", cn + 1 + " / " + cardsN.length);
+        }
+
+        function contentAnchor(element) {
+          // A split can leave an empty paragraph wrapper on the preceding page.
+          // Follow its first actual line/row as that content moves between pages.
+          return element?.querySelector(".hx-seg > div,table tr,img,svg") || element;
         }
 
         function createFitter(root) {
@@ -1593,7 +1620,7 @@ cfb/cfb.js:
           }
           return Object.freeze({ schedule, flush, cancel });
         }
-        return Object.freeze({ layoutSection, fitLines, createFitter, createSourcePager });
+        return Object.freeze({ layoutSection, fitLines, createFitter, createSourcePager, contentAnchor });
       })();
     </script>
     <script id="hwpx-distribution">
@@ -2239,7 +2266,7 @@ cfb/cfb.js:
 
         function renderParagraphSeg(p, ctx, env, segs, flowState, pager, trimCellTail) {
           var pp = ctx.paraPr[attr(p, "paraPrIDRef", "")];
-          var pgBrk = attr(p, "pageBreak", "0") === "1";
+          var pgBrk = window.HWPViewer.DocumentModel.bool(attr(p, "pageBreak", "0"));
           var align = pp ? pp.align : "justify";
           var first = true;
           var mkDiv = function () {
@@ -2402,7 +2429,7 @@ cfb/cfb.js:
         }
 
         function renderParagraph(p, ctx, env) {
-          var pgBrk2 = attr(p, "pageBreak", "0") === "1";
+          var pgBrk2 = window.HWPViewer.DocumentModel.bool(attr(p, "pageBreak", "0"));
           var div = env.doc.createElement("div");
           div.className = "hx-p";
           if (pgBrk2) div.setAttribute("data-pagebreak", "1"); // 파일이 지정한 '쪽 나누기'
@@ -2711,9 +2738,11 @@ cfb/cfb.js:
                     pageInfo.mb = num(mg, "bottom", pageInfo.mb);
                     pageInfo.headerHeight = num(mg, "header", 0);
                     pageInfo.footerHeight = num(mg, "footer", 0);
-                    pageInfo.mt += pageInfo.headerHeight;
-                    pageInfo.mb += pageInfo.footerHeight;
+                    pageInfo.gutter = num(mg, "gutter", 0);
                   }
+                  pageInfo.landscape = attr(pg, "landscape", "WIDELY").toUpperCase() === "NARROWLY";
+                  pageInfo.binding = ({ LEFT_RIGHT: 1, TOP_BOTTOM: 2 })[attr(pg, "gutterType", "LEFT_ONLY")] || 0;
+                  pageInfo = window.HWPViewer.DocumentModel.paper(pageInfo);
                 }
               }
 
@@ -2745,12 +2774,11 @@ cfb/cfb.js:
                 .forEach(function (p) {
                   var segs = parseSegs(p),
                     hasY = segs.length > 0;
-                  var explicit = attr(p, "pageBreak", "0") === "1";
-                  if (
-                    pageDiv.childNodes.length &&
-                    (explicit || (hasY && pager.shouldBreak(segs[0].y)))
-                  )
-                    pager.page();
+                  const model = window.HWPViewer.DocumentModel;
+                  const breaks = model.breaks((model.bool(attr(p, "pageBreak", "0")) ? 4 : 0) |
+                    (model.bool(attr(p, "columnBreak", "0")) ? 8 : 0));
+                  pager.beforeParagraph(breaks, hasY ? segs[0].y : null);
+                  const startPage = pageDiv, startIndex = pageDiv.children.length;
                   if (segEligible(p, segs)) {
                     renderParagraphSeg(p, ctx, env, segs, flowState, pager);
                   } else {
@@ -2772,6 +2800,19 @@ cfb/cfb.js:
                     } else flowState.prevEnd = null;
                     pageDiv.appendChild(el);
                   }
+                  const anchor = startPage.children[startIndex] || pageDiv.firstElementChild;
+                  ["header", "footer"].forEach(function (kind) {
+                    descByLn(p, kind).forEach(function (source) {
+                      const box = docRef.createElement("div");
+                      box.className = kind === "header" ? "hx-headersrc" : "hx-footersrc";
+                      box.style.display = "none";
+                      box.dataset.apply = ({ EVEN: 1, ODD: 2 })[attr(source, "applyPageType", "BOTH").toUpperCase()] || 0;
+                      box._runningAnchor = window.HWPViewer.Layout.contentAnchor(anchor);
+                      const sub = firstByLn(source, "subList");
+                      if (sub) childrenByLn(sub, "p").forEach(p => box.appendChild(renderParagraph(p, ctx, env)));
+                      secDiv.appendChild(box);
+                    });
+                  });
                 });
               if (env.notes.length) {
                 var noteBox = docRef.createElement("div");
@@ -2866,27 +2907,28 @@ cfb/cfb.js:
           };
         }
 
-        function records(u8) {
-          var out = [],
-            off = 0;
-          while (off + 4 <= u8.byteLength) {
-            var h = u8[off] | (u8[off + 1] << 8) | (u8[off + 2] << 16) | (u8[off + 3] << 24);
-            var tag = h & 0x3ff,
-              level = (h >>> 10) & 0x3ff,
-              size = h >>> 20;
-            var prev = off;
+        function records(u8, streamName) {
+          const out = [], view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+          let off = 0;
+          function damaged(reason) {
+            const error = new Error("HWP 레코드 손상: " + streamName + " @" + off + " — " + reason);
+            error.code = "HWP_RECORD_CORRUPT";
+            throw error;
+          }
+          while (off < u8.byteLength) {
+            if (u8.byteLength - off < 4) damaged("잘린 레코드 헤더");
+            const h = view.getUint32(off, true);
             off += 4;
+            let size = h >>> 20;
             if (size === 0xfff) {
-              size =
-                (u8[off] | (u8[off + 1] << 8) | (u8[off + 2] << 16) | (u8[off + 3] << 24)) >>> 0; // 부호 제거
+              if (u8.byteLength - off < 4) damaged("잘린 확장 길이");
+              size = view.getUint32(off, true);
               off += 4;
             }
-            if (size > u8.byteLength) break; // 손상: 비정상 크기
-            if (off + size > u8.byteLength) break;
-            out.push({ tag: tag, level: level, payload: u8.subarray(off, off + size) });
+            if (size > u8.byteLength - off) damaged("본문 길이가 스트림 범위를 초과함");
+            if (out.length >= 2000000) damaged("레코드 수 제한 초과");
+            out.push({ tag: h & 0x3ff, level: (h >>> 10) & 0x3ff, payload: u8.subarray(off, off + size) });
             off += size;
-            if (off <= prev) break; // 손상: 오프셋 역행 = 무한 루프 봉쇄
-            if (out.length > 2000000) break; // 안전 상한
           }
           return out;
         }
@@ -2977,7 +3019,7 @@ cfb/cfb.js:
             sectionSize: 1,
           };
           var numberingIndex = 0, bulletIndex = 0; // Each DocInfo collection has its own 1-based IDs.
-          records(u8).forEach(function (r) {
+          records(u8, "DocInfo").forEach(function (r) {
             try {
               var b = BR(r.payload);
               if (r.tag === T.DOC_PROPS) info.sectionSize = b.u16() || 1;
@@ -3091,8 +3133,8 @@ cfb/cfb.js:
         }
 
         /* ---------- Section ---------- */
-        function parseSection(u8, ctx) {
-          var rs = records(u8),
+        function parseSection(u8, ctx, streamName) {
+          var rs = records(u8, streamName),
             pos = 0,
             pageInfo = null,
             notes = [],
@@ -3118,16 +3160,11 @@ cfb/cfb.js:
             var hd = b.u32(),
               ft = b.u32(),
               gut = b.u32();
-            var landscape = b.left() >= 4 ? b.u32() & 1 : 0;
-            if (landscape) {
-              var t = w;
-              w = h;
-              h = t;
-            }
-            pageInfo = {
-              w: w, h: h, ml: ml + gut, mr: mr,
-              mt: mt + hd, mb: mb + ft, headerHeight: hd, footerHeight: ft,
-            };
+            var flags = b.left() >= 4 ? b.u32() : 0;
+            pageInfo = window.HWPViewer.DocumentModel.paper({
+              w, h, ml, mr, mt, mb, headerHeight: hd, footerHeight: ft,
+              gutter: gut, binding: (flags >>> 1) & 3, landscape: !!(flags & 1),
+            });
           }
 
           function collectParas(minLevel, into) {
@@ -3142,6 +3179,8 @@ cfb/cfb.js:
               var b = BR(r.payload);
               b.skip(8);
               para.shapeId = b.u16();
+              b.u8(); // style ID
+              para.breaks = window.HWPViewer.DocumentModel.breaks(b.u8());
             } catch (e) {
               para.broken = true;
             }
@@ -3445,7 +3484,7 @@ cfb/cfb.js:
                   } else pos++;
                 }
                 if (hps.length)
-                  (id === CT.HEAD ? headers : footers).push({ paras: hps, apply: applyTo });
+                  (id === CT.HEAD ? headers : footers).push({ paras: hps, apply: applyTo, owner: para });
               } else {
                 // 미지원(secd/cold/head 등): PAGE_DEF만 회수하고 스킵
                 var from = pos;
@@ -4178,10 +4217,14 @@ cfb/cfb.js:
           }).sort(function (a, b) {
             return +a.match(/Section(\d+)$/i)[1] - +b.match(/Section(\d+)$/i)[1];
           });
+          // Validate/parse every section before allocating rendered DOM or image URLs.
+          var sections = sectionPaths.map(function (path) {
+            var body = get(path);
+            if (!body) throw new Error("구역 읽기 실패: " + path);
+            return parseSection(body, ctx, path);
+          });
           for (var s = 0; s < sectionPaths.length; s++) {
-            var body = get(sectionPaths[s]);
-            if (!body) throw new Error("구역 읽기 실패: " + sectionPaths[s]); // 선언값(sectionSize) 오류 방어: 실재 스트림 기준
-            var sec = parseSection(body, ctx);
+            var sec = sections[s];
             totalParas += sec.paras.length;
             if (sec.pageInfo) pageInfo = sec.pageInfo;
             var secDiv = docRef.createElement("div");
@@ -4206,6 +4249,8 @@ cfb/cfb.js:
             openPage();
             sec.paras.forEach(function (p) {
               var hasY = p.segs.length > 0;
+              pager.beforeParagraph(p.breaks || {}, hasY ? p.segs[0].y : null);
+              const startPage = pageDiv, startIndex = pageDiv.children.length;
               if (canSeg(p)) {
                 renderParaSeg(p, ctx, flowState, pager); // 줄 단위로 카드에 직접 커밋
               } else {
@@ -4230,6 +4275,7 @@ cfb/cfb.js:
                   pageDiv.appendChild(el);
                 }
               }
+              p._runningAnchor = window.HWPViewer.Layout.contentAnchor(startPage.children[startIndex] || pageDiv.firstElementChild);
             });
             if (sec.notes.length) {
               var noteBox = docRef.createElement("div");
@@ -4250,24 +4296,17 @@ cfb/cfb.js:
               });
               secDiv.appendChild(noteBox);
             }
-            if (sec.headers && sec.headers.length) {
-              var hdBox = docRef.createElement("div");
-              hdBox.className = "hx-headersrc";
-              hdBox.style.display = "none"; // 원본 보관용(셸이 쪽마다 복제)
-              sec.headers[0].paras.forEach(function (p) {
-                hdBox.appendChild(renderPara(p, ctx));
+            [[sec.headers, "hx-headersrc"], [sec.footers, "hx-footersrc"]].forEach(function ([sources, name]) {
+              sources.forEach(function (source) {
+                const box = docRef.createElement("div");
+                box.className = name;
+                box.style.display = "none";
+                box.dataset.apply = source.apply;
+                box._runningAnchor = source.owner._runningAnchor;
+                source.paras.forEach(p => box.appendChild(renderPara(p, ctx)));
+                secDiv.appendChild(box);
               });
-              secDiv.appendChild(hdBox);
-            }
-            if (sec.footers && sec.footers.length) {
-              var ftBox = docRef.createElement("div");
-              ftBox.className = "hx-footersrc";
-              ftBox.style.display = "none";
-              sec.footers[0].paras.forEach(function (p) {
-                ftBox.appendChild(renderPara(p, ctx));
-              });
-              secDiv.appendChild(ftBox);
-            }
+            });
             container.appendChild(secDiv);
           }
           if (totalParas === 0) throw new Error("본문 추출 실패 (문단 구조 없음)");
@@ -4664,7 +4703,7 @@ cfb/cfb.js:
           var sections = Array.from(hxPage.querySelectorAll(".hx-section"));
           if (!sections.length) sections = [hxPage];
           var printRules = [],
-            maxWidth = 0;
+            maxWidth = 0, physicalPageOffset = 0;
           hxZoom.style.zoom = 1;
           sections.forEach(function (section, index) {
             var pi = section._pageInfo || info.pageInfo;
@@ -4681,8 +4720,9 @@ cfb/cfb.js:
               throw new Error("지원할 수 없는 용지 크기 또는 여백");
             window.HWPViewer.Layout.layoutSection(
               section,
-              Object.assign({}, info, { pageInfo: pi }),
+              Object.assign({}, info, { pageInfo: pi, pageOffset: physicalPageOffset }),
             );
+            physicalPageOffset += section.querySelectorAll(".hx-pagecard").length;
             maxWidth = Math.max(maxWidth, pi.w * info.U2PX);
             var name = "hxSheet" + index,
               w = (pi.w * info.U2MM).toFixed(3),
@@ -4709,9 +4749,9 @@ cfb/cfb.js:
                 w +
                 "mm!important;height:" +
                 h +
-                "mm!important;padding:" +
+                "mm!important;padding:var(--hx-print-padding," +
                 padding +
-                "!important;}",
+                ")!important;}",
             );
           });
           pagePxWidth = maxWidth;
@@ -4815,6 +4855,8 @@ cfb/cfb.js:
             showBinary(binaryStr);
             return;
           } catch (e) {
+            if (e.code === "HWP_RECORD_CORRUPT")
+              return fail("HWP 파일이 손상되어 열 수 없습니다", e.message);
             console.warn("전용 렌더러 실패, hwp.js 폴백:", e.message);
             if (/암호화|배포용/.test(e.message)) {
               return fail(

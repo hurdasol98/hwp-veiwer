@@ -8,7 +8,8 @@
     "test:fidelity": "node tests/fidelity.cjs",
     "test:fonts": "node tests/language-fonts.cjs",
     "test:font-reflow": "node tests/font-reflow.cjs",
-    "test:fields": "node tests/hwpx-fields.cjs"
+    "test:fields": "node tests/hwpx-fields.cjs",
+    "test:document": "node tests/document-model.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
