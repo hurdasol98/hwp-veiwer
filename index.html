@@ -1093,6 +1093,73 @@ cfb/cfb.js:
           };
         }
 
+        function flowObjects(el) {
+          return Array.from(el.querySelectorAll("table,img,.hx-shape"))
+            .filter(object => !object.closest("[data-object-overlay]"));
+        }
+
+        function flowHeight(el, scale) {
+          const rect = el.getBoundingClientRect();
+          const height = rect.height / scale;
+          if (!el.querySelector("[data-object-overlay]"))
+            return el.querySelector("table,img,.hx-shape") && el.scrollHeight > Math.ceil(height)
+              ? el.scrollHeight : height;
+          // scrollHeight includes absolutely positioned descendants. Measure only
+          // flow objects when an overlay is present, preserving genuine table overflow.
+          return flowObjects(el).reduce((bottom, object) => Math.max(bottom,
+            (object.getBoundingClientRect().bottom - rect.top) / scale), height);
+        }
+
+        function positionOverlays(root, info) {
+          const pageNumbers = new Map(Array.from(root.querySelectorAll(".hx-pagecard"),
+            (card, index) => [card, (info.pageOffset || 0) + index + 1]));
+          const levels = [];
+          root.querySelectorAll("[data-object-overlay]").forEach(el => {
+            let depth = 0, parent = el.parentElement.closest("[data-object-overlay]");
+            while (parent) { depth++; parent = parent.parentElement.closest("[data-object-overlay]"); }
+            (levels[depth] ||= []).push(el);
+          });
+          levels.forEach(elements => {
+            const plans = elements.map(el => {
+              const p = JSON.parse(el.dataset.objectOverlay);
+              const card = el.closest(".hx-pagecard");
+              if (!card) return null;
+              const cr = card.getBoundingClientRect();
+              const scale = cr.width / parseFloat(card.style.width) || 1;
+              const css = getComputedStyle(card);
+              const ml = parseFloat(css.paddingLeft), mr = parseFloat(css.paddingRight);
+              const mt = parseFloat(css.paddingTop), mb = parseFloat(css.paddingBottom);
+              const width = cr.width / scale, height = info.pageInfo.h * info.U2PX;
+              const parent = el.parentElement.getBoundingClientRect();
+              const para = {x: (parent.left-cr.left)/scale, y: (parent.top-cr.top)/scale,
+                w: parent.width/scale, h: parent.height/scale};
+              const paper = {x:0,y:0,w:width,h:height};
+              const body = {x:ml,y:mt,w:width-ml-mr,h:height-mt-mb};
+              const horizontal = p.href === 0 ? paper : p.href === 3 ? para : body;
+              const vertical = p.vref === 0 ? paper : p.vref === 2 ? para : body;
+              const er = el.getBoundingClientRect();
+              // Derive the containing-block origin from the positioned border box.
+              // offsetParent rectangles include borders (including half collapsed table borders).
+              const origin = {left: er.left - (parseFloat(el.style.left) || 0) * scale,
+                top: er.top - (parseFloat(el.style.top) || 0) * scale};
+              const pageNumber = pageNumbers.get(card);
+              const align = n => n === 3 ? (pageNumber % 2 ? 0 : 2) : n === 4 ? (pageNumber % 2 ? 2 : 0) : n;
+              const axis = (start, size, extent, alignment, offset) => start +
+                (alignment === 1 ? (size-extent)/2 : alignment === 2 ? size-extent : 0) + offset * info.U2PX;
+              return {el, card, flow:p.flow, z:p.z || 0,
+                x: axis(horizontal.x,horizontal.w,er.width/scale,align(p.halign),p.x || 0) - (origin.left-cr.left)/scale,
+                y: axis(vertical.y,vertical.h,er.height/scale,align(p.valign),p.y || 0) - (origin.top-cr.top)/scale};
+            }).filter(Boolean);
+            // Keep source order within each layer without trusting unbounded z-index values.
+            plans.sort((a,b) => a.z-b.z);
+            plans.forEach((plan,index) => {
+              plan.card.style.isolation = "isolate";
+              Object.assign(plan.el.style, {left:plan.x+"px",top:plan.y+"px",
+                zIndex:String(plan.flow === 4 ? index-plans.length : index+1)});
+            });
+          });
+        }
+
         // A complete source page owns its geometry. Browser font metrics must not
         // move subsequent paragraphs or change its page count.
         function alignSourcePages(root) {
@@ -1126,9 +1193,7 @@ cfb/cfb.js:
             // Only preserve fixed geometry when actual content fits without overlap.
             const zoom = card.getBoundingClientRect().width / parseFloat(padding.width) || 1;
             const heights = units.map(unit => {
-              const boxHeight = unit.getBoundingClientRect().height / zoom;
-              return unit.querySelector("table,img,.hx-shape") && unit.scrollHeight > Math.ceil(boxHeight)
-                ? unit.scrollHeight : boxHeight;
+              return flowHeight(unit, zoom);
             });
             const extents = units.map((unit, i) => Math.max(
               (coordinates[i].end - coordinates[i].top) * POINT_TO_PX,
@@ -1141,7 +1206,7 @@ cfb/cfb.js:
               const bottom = c.top * POINT_TO_PX + extents[i];
               const boundary = i + 1 < units.length ? coordinates[i + 1].top * POINT_TO_PX : available;
               // Text glyph ink can exceed a line box; only block extents determine collision.
-              const end = units[i].querySelector("table,img,.hx-shape") ? bottom : c.end * POINT_TO_PX;
+              const end = flowObjects(units[i]).length ? bottom : c.end * POINT_TO_PX;
               return end <= boundary + MEASUREMENT_TOLERANCE;
             });
             Object.assign(plan, {coordinates, padding: {paddingTop: padding.paddingTop,
@@ -1214,9 +1279,7 @@ cfb/cfb.js:
           });
           candidates.forEach(el => {
             const css = getComputedStyle(el);
-            const boxHeight = el.getBoundingClientRect().height / (scale || 1);
-            const contentHeight = el.querySelector("table,img,.hx-shape") && el.scrollHeight > Math.ceil(boxHeight)
-              ? el.scrollHeight : boxHeight;
+            const contentHeight = flowHeight(el, scale || 1);
             measured.set(el, {height: contentHeight,
               top: parseFloat(css.marginTop) || 0, bottom: parseFloat(css.marginBottom) || 0});
           });
@@ -1309,7 +1372,7 @@ cfb/cfb.js:
                 pendingBottom = mb;
                 continue;
               }
-              var tbl = el.querySelector && el.querySelector("table");
+              var tbl = flowObjects(el).find(object => object.tagName === "TABLE");
               // 분할 가능 행 경계: 해당 행 시작 시점에 '열려 있는 rowspan'이 없는 곳
               var safeRow = null;
               if (tbl && tbl.rows.length) {
@@ -1340,14 +1403,19 @@ cfb/cfb.js:
                 // Keep a repeated heading with its first data row. Measure merged
                 // row groups before deciding whether they fit in the remaining space.
                 if (tbl.getAttribute("data-rephdr") === "1") safeRow[1] = false;
+                const wrapperRect = el.getBoundingClientRect(), tableRect = tbl.getBoundingClientRect();
+                const tableBefore = Math.max(0, (tableRect.top - wrapperRect.top) / (scale || 1));
+                const tableAfter = Math.max(0, (wrapperRect.bottom - tableRect.bottom) / (scale || 1));
+                const rowLimit = limit - tableAfter;
+                used += tableBefore;
                 var groupH = rowH.slice();
                 for (var rg = rows.length - 2; rg >= 0; rg--)
                   if (!safeRow[rg + 1]) groupH[rg] += groupH[rg + 1];
                 var shell = tbl;
                 for (var ri = 0; ri < rows.length; ri++) {
                   if (tbl.getAttribute("data-split") === "1" && safeRow[ri] && safeRow[ri + 1] &&
-                      used + groupH[ri] > limit) {
-                    const tail = splitCellRow(rows[ri], contentHpx - used);
+                      used + groupH[ri] > rowLimit) {
+                    const tail = splitCellRow(rows[ri], contentHpx - tableAfter - used);
                     if (tail) {
                       const firstHeight = rows[ri].getBoundingClientRect().height / (scale || 1);
                       const tailHeight = tail.getBoundingClientRect().height / (scale || 1);
@@ -1359,12 +1427,12 @@ cfb/cfb.js:
                   }
                   var rh = rowH[ri];
                   if (
-                    used + groupH[ri] > limit &&
-                    used > 0 &&
+                    used + groupH[ri] > rowLimit &&
+                    used > tableBefore &&
                     (!safeRow || safeRow[ri])
                   ) {
                     target = mk(target);
-                    used = 0;
+                    used = tableBefore;
                     var t2 = tbl.cloneNode(false);
                     t2.style.cssText = tbl.style.cssText;
                     t2.style.height = ""; // 조각에도 지정높이 금지
@@ -1388,6 +1456,7 @@ cfb/cfb.js:
                   (shell.tBodies[0] || shell).appendChild(rows[ri]);
                   used += rh;
                 }
+                used += tableAfter;
                 pendingBottom = mb;
               } else if (
                 el.classList &&
@@ -1499,7 +1568,7 @@ cfb/cfb.js:
               var cd = allCards[ec];
               if (
                 !cd.textContent.trim() &&
-                !cd.querySelector("table,img,svg") &&
+                !cd.querySelector("table,img,svg,[data-object-overlay]") &&
                 root.querySelectorAll(".hx-pagecard").length > 1
               )
                 cd.remove();
@@ -1551,7 +1620,7 @@ cfb/cfb.js:
               var cdF = finalCards[fc];
               if (
                 !cdF.textContent.trim() &&
-                !cdF.querySelector("table,img,svg") &&
+                !cdF.querySelector("table,img,svg,[data-object-overlay]") &&
                 root.querySelectorAll(".hx-pagecard").length > 1
               )
                 cdF.remove();
@@ -1591,6 +1660,7 @@ cfb/cfb.js:
             });
           });
           headerSources.concat(footerSources).forEach(el => el.remove());
+          positionOverlays(root, info);
           markOverflow(root);
           // 쪽 번호: 카드 속성으로만 표기 (별도 노드 금지 — 인쇄 페이지 분절을 교란함)
           var cardsN = root.querySelectorAll(".hx-pagecard");
@@ -3353,12 +3423,18 @@ cfb/cfb.js:
                 try {
                   var cAttr = b.u32(); // 개체 공통속성
                   common.inline = !!(cAttr & 1); // bit0 글자처럼 취급
-                  common.flow = (cAttr >>> 21) & 7; // 0 어울림 / 1 자리차지 / 2 글뒤 / 3 글앞
+                  common.flow = (cAttr >>> 21) & 7; // HWP table 70: square/tight/through/top-bottom/behind/front
                   common.halign = (cAttr >>> 10) & 7; // 0 왼 / 1 가운데 / 2 오른
-                  b.u32();
-                  b.u32(); // 세로/가로 오프셋
+                  common.vref = (cAttr >>> 3) & 3;
+                  common.valign = (cAttr >>> 5) & 7;
+                  common.href = (cAttr >>> 8) & 3;
+                  common.textSide = (cAttr >>> 24) & 3;
+                  common.y = b.i32();
+                  common.x = b.i32();
                   common.w = b.u32();
                   common.h = b.u32();
+                  if (b.left() >= 4) common.z = b.i32();
+                  if (b.left() >= 8) common.margin = [b.u16(), b.u16(), b.u16(), b.u16()];
                   if (common.w > 500000) common.w = 0;
                   if (common.h > 500000) common.h = 0;
                 } catch (e2) {
@@ -3377,6 +3453,7 @@ cfb/cfb.js:
                   inline: common.inline,
                   flow: common.flow,
                   halign: common.halign,
+                  placement: common,
                 };
                 while (pos < rs.length && rs[pos].level > level) {
                   var c = rs[pos];
@@ -3412,6 +3489,7 @@ cfb/cfb.js:
                   inline: common.inline,
                   flow: common.flow,
                   halign: common.halign,
+                  placement: common,
                 };
                 while (pos < rs.length && rs[pos].level > level) {
                   var c2 = rs[pos];
@@ -3782,6 +3860,9 @@ cfb/cfb.js:
               return typeof ch === "string" && ch.trim();
             });
           if (objectOnly) {
+            // A standalone table owns its margin/float extent; prevent parent
+            // margin collapse and clearance from escaping the measured unit.
+            div.style.display = "flow-root";
             div.style.lineHeight = "normal";
             div.style.marginTop = "0";
             div.style.marginBottom = "0";
@@ -3791,13 +3872,12 @@ cfb/cfb.js:
             div.style.minHeight = "0";
             para.blocks.forEach(function (block) {
               var node = renderBlock(block, ctx);
-              if (block.inline || block.flow === 1) node.style.margin = "0";
               div.appendChild(node);
             });
             if (
               para.segs.length === 1 &&
               para.blocks.every(function (b) {
-                return b.inline || b.flow === 1;
+                return b.inline || b.flow === 3;
               })
             ) {
               // Following-line spacing is not part of the object’s minimum height.
@@ -3922,11 +4002,32 @@ cfb/cfb.js:
         }
 
         function applyWrapFloat(el, blk) {
-          // 글자처럼(X) + 어울림(0)/글뒤(2)/글앞(3): 세로 공간을 차지하지 않음 — float로 근사
-          if (blk.inline || blk.flow === 1 || blk.flow === undefined) return false;
-          var right = blk.halign !== 0; // 왼쪽 정렬만 좌측, 그 외 우측
+          const p = blk.placement || {};
+          const m = p.margin || [0, 0, 0, 0]; // source order: left/right/top/bottom
+          el.style.margin = [m[2], m[1], m[3], m[0]].map(n => n * U2PX + "px").join(" ");
+          if (blk.inline || blk.flow === undefined || blk.flow < 4)
+            el.style.maxWidth = "calc(100% - " + (m[0] + m[1]) * U2PX + "px)";
+          if (blk.inline || blk.flow === undefined) return false;
+          el.dataset.objectWrap = String(blk.flow);
+          if (blk.flow === 4 || blk.flow === 5) {
+            // Behind/in-front objects never reserve a float exclusion area.
+            el.dataset.objectOverlay = JSON.stringify(p);
+            Object.assign(el.style, {position: "absolute", left: "0", top: "0", margin: "0"});
+            return true;
+          }
+          if (blk.flow === 3) {
+            if (el.tagName !== "TABLE") el.style.display = "block";
+            el.style.clear = "both";
+            // Auto margins implement alignment without a document-specific shift.
+            if (blk.halign === 1 || blk.halign === 2) el.style.marginLeft = "auto";
+            if (blk.halign === 1) el.style.marginRight = "auto";
+            return true;
+          }
+          if (blk.flow > 2) return false; // reserved values do not become floats
+          // Tight/through use the bounding rectangle until contour paths are supported.
+          // Text on the left requires the object on the right, and conversely.
+          const right = p.textSide === 1 || (p.textSide !== 2 && blk.halign === 2);
           el.style.cssFloat = right ? "right" : "left";
-          el.style.margin = right ? "2px 0 6px 10px" : "2px 10px 6px 0";
           return true;
         }
 

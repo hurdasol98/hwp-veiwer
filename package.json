@@ -9,7 +9,8 @@
     "test:fonts": "node tests/language-fonts.cjs",
     "test:font-reflow": "node tests/font-reflow.cjs",
     "test:fields": "node tests/hwpx-fields.cjs",
-    "test:document": "node tests/document-model.cjs"
+    "test:document": "node tests/document-model.cjs",
+    "test:objects": "node tests/objects.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
