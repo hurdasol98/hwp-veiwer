@@ -147,6 +147,81 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         root.remove();
       }
       {
+        const { root, card } = section();
+        const wrap = document.createElement('div'), table = document.createElement('table');
+        wrap.className = 'hx-p';
+        table.style.cssText = 'width:300px;table-layout:fixed;border-collapse:collapse;margin:0';
+        table.dataset.split = '2';
+        table.dataset.rephdr = '1';
+        function cell(row, text, height) {
+          const td = row.insertCell();
+          td.textContent = text;
+          td.style.cssText = 'padding:0;border:0;height:' + height + 'px;font-size:12px';
+          return td;
+        }
+        const h0 = table.insertRow();
+        cell(h0, '비목', 20).colSpan = 2;
+        cell(h0, '내역', 20).rowSpan = 2;
+        const h1 = table.insertRow();
+        cell(h1, '목', 20);
+        cell(h1, '세목', 20);
+        for (let i = 0; i < 3; i++) {
+          const row = table.insertRow();
+          cell(row, '운영비', 30);
+          cell(row, '일반수용비', 30);
+          cell(row, '내용' + i, 30);
+        }
+        wrap.appendChild(table); card.appendChild(wrap);
+        HWPViewer.Layout.layoutSection(root, info);
+        const fragments = [...root.querySelectorAll('table')];
+        check(fragments.length === 2, 'merged repeat heading pagination');
+        const continued = fragments[1];
+        check(
+          continued.rows.length >= 3 &&
+            continued.rows[0].cells[0].colSpan === 2 &&
+            continued.rows[0].cells[1].rowSpan === 2 &&
+            continued.rows[1].cells.length === 2 &&
+            continued.rows[2].cells.length === 3,
+          'repeat complete rowspan heading group before data rows',
+        );
+        root.remove();
+      }
+      // A rowspan beginning in the second header row extends the group transitively.
+      // Also exercise an indivisible header+body group taller than the page.
+      for (const bodyHeight of [30, 50]) {
+        const { root, card } = section();
+        const wrap = document.createElement('div'), table = document.createElement('table');
+        wrap.className = 'hx-p';
+        table.style.cssText = 'width:300px;table-layout:fixed;border-collapse:collapse;margin:0';
+        table.dataset.split = '2';table.dataset.rephdr = '1';
+        const cell = (row, text, span = 1) => {
+          const td = row.insertCell();td.textContent = text;td.rowSpan = span;
+          td.style.cssText = 'padding:0;border:0;font-size:10px;line-height:10px';return td;
+        };
+        const headers = [0,1,2].map(() => {const row=table.insertRow();row.style.height='20px';return row;});
+        cell(headers[0],'HEAD-A',2);cell(headers[0],'HEAD-B');
+        cell(headers[1],'HEAD-C',2);cell(headers[2],'HEAD-D');
+        for(let i=0;i<4;i++) {
+          const row=table.insertRow();row.style.height=bodyHeight+'px';row.dataset.body=String(i);
+          cell(row,'BODY'+i);cell(row,'VALUE'+i);
+        }
+        wrap.appendChild(table);card.appendChild(wrap);
+        for(let pass=0;pass<2;pass++) {
+          HWPViewer.Layout.layoutSection(root,info);
+          const fragments=[...root.querySelectorAll('table')];
+          check(fragments.length===4,'transitive header pagination terminates '+bodyHeight);
+          check(fragments.every(t=>t.rows.length===4&&t.rows[0].textContent==='HEAD-AHEAD-B'&&
+            t.rows[1].cells[0].rowSpan===2&&t.rows[2].textContent==='HEAD-D'&&t.rows[3].dataset.body!==undefined),
+            'complete header followed by data on every fragment');
+          check([...root.querySelectorAll('[data-body]')].map(r=>r.dataset.body).join(',')==='0,1,2,3','data appears once in original order');
+          if(bodyHeight===30) fragments.forEach(t=> {
+            const card=t.closest('.hx-pagecard');
+            check(t.getBoundingClientRect().bottom<=card.getBoundingClientRect().top+125+1,'repeated header height counted');
+          });
+        }
+        root.remove();
+      }
+      {
         const { root } = tableCase([80, 40, 40], false, true);
         HWPViewer.Layout.layoutSection(root, info);
         check(root.querySelectorAll('.hx-pagecard').length === 2, 'oversized heading group must not keep spawning pages');

@@ -1400,9 +1400,28 @@ cfb/cfb.js:
                 var rows = Array.prototype.slice.call(tbl.rows);
                 var rowH = [];
                 for (var rm = 0; rm < rows.length; rm++) rowH.push(rows[rm].getBoundingClientRect().height / (scale || 1)); // 이동 전 일괄 측정
-                // Keep a repeated heading with its first data row. Measure merged
-                // row groups before deciding whether they fit in the remaining space.
-                if (tbl.getAttribute("data-rephdr") === "1") safeRow[1] = false;
+                // A repeated heading can span several rows when the first heading row
+                // contains rowspan cells. Follow those rowspans transitively so every
+                // continuation fragment gets a structurally complete heading.
+                var repeatHeaderRows = 0;
+                if (tbl.getAttribute("data-rephdr") === "1" && rows.length) {
+                  repeatHeaderRows = 1;
+                  for (var hr = 0; hr < repeatHeaderRows && hr < rows.length; hr++) {
+                    var headerCells = rows[hr].cells;
+                    for (var hc = 0; hc < headerCells.length; hc++) {
+                      var headerSpan =
+                        parseInt(headerCells[hc].getAttribute("rowspan") || "1", 10) || 1;
+                      repeatHeaderRows = Math.min(
+                        rows.length,
+                        Math.max(repeatHeaderRows, hr + headerSpan),
+                      );
+                    }
+                  }
+                  // Keep the complete heading together with the first data row so a
+                  // page never ends with only the repeated heading.
+                  for (var hb = 1; hb <= repeatHeaderRows && hb < safeRow.length; hb++)
+                    safeRow[hb] = false;
+                }
                 const wrapperRect = el.getBoundingClientRect(), tableRect = tbl.getBoundingClientRect();
                 const tableBefore = Math.max(0, (tableRect.top - wrapperRect.top) / (scale || 1));
                 const tableAfter = Math.max(0, (wrapperRect.bottom - tableRect.bottom) / (scale || 1));
@@ -1446,11 +1465,13 @@ cfb/cfb.js:
                     w2.appendChild(t2);
                     target.appendChild(w2);
                     shell = t2;
-                    // Repeat only when the document requests it.
-                    if (tbl.getAttribute("data-rephdr") === "1" && rows[0] && ri > 0) {
-                      var hd = rows[0].cloneNode(true);
-                      (t2.tBodies[0] || t2).appendChild(hd);
-                      used += rowH[0];
+                    // Repeat the whole merged heading group, not only row 0.
+                    if (repeatHeaderRows && ri >= repeatHeaderRows) {
+                      for (var hdIndex = 0; hdIndex < repeatHeaderRows; hdIndex++) {
+                        var hd = rows[hdIndex].cloneNode(true);
+                        (t2.tBodies[0] || t2).appendChild(hd);
+                        used += rowH[hdIndex];
+                      }
                     }
                   }
                   (shell.tBodies[0] || shell).appendChild(rows[ri]);
